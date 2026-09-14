@@ -1,0 +1,585 @@
+# Tablero Forecast IBP
+
+- ZAREAGC
+
+let
+    BaseUrl = "https://my308646-api.scmibp1.ondemand.com",
+
+    Response = Web.Contents(
+        BaseUrl,
+        [
+            RelativePath = "sap/opu/odata/IBP/EXTRACT_ODATA_SRV/MOLIBP",
+            Query = [
+                #"$select" = "ZAREAGC,ACTUALSQTY,UOMTOID",
+                #"$filter" = "UOMTOID eq 'UMG' and ZCLIENTEBOCA eq 'Cliente'",
+                #"$format" = "json"
+            ],
+            Headers = [ Accept = "application/json" ]
+        ]
+    ),
+
+    Json = Json.Document(Response),
+    Data = Json[d][results],
+    Tabla = Table.FromRecords(Data),
+
+    // Limpieza
+    #"Columnas quitadas" = Table.RemoveColumns(Tabla, {"__metadata"}),
+
+    // Conversión robusta de ACTUALSQTY
+    #"ACTUALSQTY a texto" = Table.TransformColumnTypes(#"Columnas quitadas", {{"ACTUALSQTY", type text}}),
+    #"Quitar separador de miles" = Table.TransformColumns(#"ACTUALSQTY a texto", {
+        {"ACTUALSQTY", each Text.Replace(_, ",", ""), type text}
+    }),
+    #"ACTUALSQTY a número" = Table.TransformColumns(#"Quitar separador de miles", {
+        {"ACTUALSQTY", each Number.FromText(_, "en-US"), type number}
+    }),
+
+    // Renombrar columnas
+    Resultado = Table.RenameColumns(#"ACTUALSQTY a número", {{"ZAREAGC", "Area/GC"}})
+in
+    Resultado
+
+- FCST HIST
+
+let
+    // === CARGAR LAS DOS TABLAS BASE ===
+    ZHIST = ZHIST,   // <-- Reemplazá con el nombre real de la consulta ZHIST
+    ZFCST = ZFCST,   // <-- Reemplazá con el nombre real de la consulta ZFCST
+
+    // === PREPARAR HISTÓRICO ===
+    HistoricoFiltrado = Table.SelectRows(ZHIST, each [Tipo de Historia] = "Historico Ajustado"),
+    HistoricoRenombrado = Table.RenameColumns(HistoricoFiltrado, {
+        {"Tipo de Historia", "Tipo"},
+        {"Valor", "Valor"}
+    }),
+    HistoricoEtiquetado = Table.AddColumn(HistoricoRenombrado, "Origen", each "Histórico", type text),
+
+    // === PREPARAR FORECAST ===
+    ForecastRenombrado = Table.RenameColumns(ZFCST, {
+        {"Tipo de Forecast", "Tipo"},
+        {"Valor", "Valor"}
+    }),
+    ForecastEtiquetado = Table.AddColumn(ForecastRenombrado, "Origen", each "Forecast", type text),
+
+    // === UNIFICAR TABLAS ===
+    DatosCombinados = Table.Combine({HistoricoEtiquetado, ForecastEtiquetado}),
+
+    // === AGREGAR CATEGORÍA DE TIPO DE SERIE ===
+    FechaActual = Date.StartOfMonth(DateTime.Date(DateTime.LocalNow())),
+    DatosEtiquetados = Table.AddColumn(DatosCombinados, "TipoSerie", each 
+        if [Origen] = "Histórico" then "Observado"
+        else if [Origen] = "Forecast" and [Time Periods] < FechaActual then "Forecast Histórico"
+        else "Forecast Actual", type text),
+
+    // === ORDEN FINAL ===
+    ResultadoFinal = Table.Sort(DatosEtiquetados, {{"Time Periods", Order.Descending}})
+
+in
+    ResultadoFinal
+
+- ZHIST
+
+let
+    // 📆 Lista de años y meses (editá libremente)
+    años  = {2021, 2022, 2023, 2024, 2025,2026},
+    meses = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"},
+
+    // 📅 Fechas: hasta el mes anterior
+    fechaFin = Date.AddMonths(Date.StartOfMonth(DateTime.LocalNow()), -1),
+
+    // 🌐 Base URL del servicio
+    BaseUrl = "https://my308646-api.scmibp1.ondemand.com",
+
+    // 🔁 Combinaciones año-mes
+    AñoMes = List.TransformMany(años, each meses, (año, mes) => [Año = año, Mes = mes]),
+
+    // 🧮 Mapear a fecha (1° de mes) y filtrar hasta mes anterior
+    MesANum = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"},
+    AñoMesFiltrado =
+        List.Select(
+            AñoMes,
+            (r) =>
+                let
+                    m = 1 + List.PositionOf(MesANum, r[Mes]),
+                    f = Date.FromText(Text.From(r[Año]) & "-" & Text.PadStart(Text.From(m), 2, "0") & "-01")
+                in
+                    Date.From(f) <= Date.From(fechaFin)
+
+        ),
+
+    // ⚙️ Función por período yy-MMM (proper case)
+    ObtenerDatosPorAñoMes = (añoMes as record) as table =>
+        let
+            periodo  = Text.End(Text.From(añoMes[Año]), 2) & "-" & añoMes[Mes],   // e.g. 25-Jul
+            Response = Web.Contents(
+                BaseUrl,
+                [
+                    RelativePath = "sap/opu/odata/IBP/EXTRACT_ODATA_SRV/MOLIBP",
+                    Query = [
+                        #"$select" = "PERIODID3,PRDID,ZAREAGC,ACTUALSQTY,ADJUSTEDACTUALSQTY,UOMTOID",
+                        #"$filter" = "PERIODID3 eq '" & periodo & "' and UOMTOID eq 'UMG' and ZVIGENCIA eq '1' and ZAREAFCST ne 'Comex' and ZCLIENTEBOCA eq 'Cliente'",
+                        #"$format" = "json"
+                    ],
+                    Headers = [Accept = "application/json"]
+                ]
+            ),
+            Json  = Json.Document(Response),
+            Data  = try Json[d][results] otherwise {},
+            Tabla = Table.FromRecords(Data)
+        in
+            Tabla,
+
+    // 📥 Ejecutar para cada combinación y unificar
+    DatosPorMes       = List.Transform(AñoMesFiltrado, each ObtenerDatosPorAñoMes(_)),
+    DatosCombinados   = Table.Combine(DatosPorMes),
+
+    // 🧹 Quitar columnas si existen (robusto)
+    colsObjetivo   = {"__metadata","UOMTOID"},
+    colsPresentes  = List.Intersect({Table.ColumnNames(DatosCombinados), colsObjetivo}),
+    OrigenSinColumnas =
+        if List.Count(colsPresentes) > 0
+        then Table.RemoveColumns(DatosCombinados, colsPresentes)
+        else DatosCombinados,
+
+    // ✏️ Renombrar (ignora si falta alguna)
+    OrigenRenombrado = Table.RenameColumns(OrigenSinColumnas, {
+        {"PERIODID3", "Time Periods"},
+        {"PRDID", "Product ID"},
+        {"ZAREAGC", "Area/GC"},
+        {"ACTUALSQTY", "Histórico de Ventas"},
+        {"ADJUSTEDACTUALSQTY", "Historico Ajustado"}
+    }, MissingField.Ignore),
+
+    // 📆 'yy-MMM' → date (1° de mes) usando mapa en MAYÚSCULAS
+    AddFirstDayOfMonth = Table.AddColumn(OrigenRenombrado, "FirstDayOfMonth", each 
+        let
+            parts = Text.Split([Time Periods], "-"),
+            dt =
+                if List.Count(parts) = 2 then
+                    let
+                        y = "20" & Text.Start(parts{0}, 2),
+                        m = 1 + List.PositionOf({"JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"}, Text.Upper(parts{1}))
+                    in
+                        try Date.FromText(y & "-" & Text.PadStart(Text.From(m), 2, "0") & "-01") otherwise null
+                else
+                    null
+        in
+            dt,
+        type date
+    ),
+
+    // 🏷️ Reemplazar columna original por la fecha real
+    ConFecha = Table.RenameColumns(
+        Table.RemoveColumns(AddFirstDayOfMonth, {"Time Periods"}),
+        {{"FirstDayOfMonth", "Time Periods"}}
+    ),
+
+    // 🔄 Unpivot a formato largo
+    DatosDesplegados = Table.UnpivotOtherColumns(
+        ConFecha, {"Time Periods","Product ID","Area/GC"}, "Tipo de Historia", "Valor"
+    ),
+
+    // 🔢 Limpieza numérica robusta (quita "," miles, respeta "." decimal)
+    #"Valor a texto"           = Table.TransformColumnTypes(DatosDesplegados, {{"Valor", type text}}),
+    #"Sin separador de miles"  = Table.TransformColumns(#"Valor a texto", {{"Valor", each Text.Replace(_, ",", ""), type text}}),
+    #"Valor a número"          = Table.TransformColumns(#"Sin separador de miles", {{"Valor", each Number.FromText(_, "en-US"), type number}}),
+
+    // 📊 Orden final
+    ColumnasReordenadas = Table.ReorderColumns(#"Valor a número",
+        {"Time Periods","Product ID","Area/GC","Tipo de Historia","Valor"})
+in
+    ColumnasReordenadas
+
+- ZFCST
+
+let
+    // 🕒 Control de rango
+    mesActual = Date.StartOfMonth(DateTime.LocalNow()),
+    inicio    = Date.AddMonths(mesActual, -12), // 12 meses hacia atrás (excluye el actual)
+    fin       = Date.AddMonths(mesActual,  11), // 12 meses hacia adelante incluyendo el actual
+
+    // 🌐 Base URL
+    BaseUrl = "https://my308646-api.scmibp1.ondemand.com",
+
+    // 📅 Generar todos los meses del rango (1° de cada mes)
+    FechasRango = List.Generate(
+        () => inicio,
+        (d) => d <= fin,
+        (d) => Date.AddMonths(d, 1)
+    ),
+
+    // 🧭 Mapear fechas a records {Año, Mes="Jan"...}
+    meses = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"},
+    AñoMesTotal = List.Transform(
+        FechasRango,
+        (d) => [Año = Date.Year(d), Mes = meses{Date.Month(d) - 1}]
+    ),
+
+    // ⚙️ Función por período yy-MMM
+    ObtenerDatosPorAñoMes = (añoMes as record) as table =>
+        let
+            añoTexto = Text.End(Text.From(añoMes[Año]), 2),     // "2025" → "25"
+            periodo  = añoTexto & "-" & añoMes[Mes],
+            Response = Web.Contents(
+                BaseUrl,
+                [
+                    RelativePath = "sap/opu/odata/IBP/EXTRACT_ODATA_SRV/MOLIBP",
+                    Query = [
+                        #"$select" = "PERIODID3,PRDID,ZAREAGC,ZESTADISTICOAJUSTADO,STATISTICALFORECASTQTY,ZFORECASTDEMANDA,SALESMGRFORECASTQTY,SALESFORECASTQTY,DEMANDPLANNINGQTY,ZFCSTESTIMADO,UOMTOID",
+                        #"$filter" = "PERIODID3 eq '" & periodo & "' and UOMTOID eq 'UMG' and ZVIGENCIA eq '1' and ZAREAFCST ne 'Comex' and ZCLIENTEBOCA eq 'Cliente'",
+                        #"$format" = "json"
+                    ],
+                    Headers = [Accept = "application/json"]
+                ]
+            ),
+            Json  = Json.Document(Response),
+            Data  = try Json[d][results] otherwise {},
+            Tabla = Table.FromRecords(Data)
+        in
+            Tabla,
+
+    // 📥 Ejecutar para todo el rango
+    DatosPorMes     = List.Transform(AñoMesTotal, each ObtenerDatosPorAñoMes(_)),
+    DatosCombinados = Table.Combine(DatosPorMes),
+
+    // 🧹 Remover columnas solo si existen
+    colsDrop  = {"__metadata","UOMTOID"},
+    presentes = List.Intersect({Table.ColumnNames(DatosCombinados), colsDrop}),
+    OrigenSinColumnas =
+        if List.Count(presentes) > 0
+        then Table.RemoveColumns(DatosCombinados, presentes)
+        else DatosCombinados,
+
+    // ✏️ Renombrar (ignora faltantes)
+    OrigenRenombrado = Table.RenameColumns(OrigenSinColumnas, {
+        {"PERIODID3", "Time Periods"},
+        {"PRDID", "Product ID"},
+        {"ZAREAGC", "Area/GC"},
+        {"ZESTADISTICOAJUSTADO", "Estadístico Ajustado"},
+        {"STATISTICALFORECASTQTY", "01 - Forecast Estadístico"},
+        {"ZFORECASTDEMANDA", "03 - Forecast Demanda"},
+        {"SALESMGRFORECASTQTY", "04 - Forecast Comercial"},
+        {"SALESFORECASTQTY", "05 - Forecast Planeamiento Comercial"},
+        {"DEMANDPLANNINGQTY", "07 - Forecast Consensuado"},
+        {"ZFCSTESTIMADO", "12 - Estimado Consensuado"}
+    }, MissingField.Ignore),
+
+    // 📆 'yy-MMM' → date (1° de mes)
+    AddFirstDayOfMonth = Table.AddColumn(OrigenRenombrado, "FirstDayOfMonth", each 
+        let
+            parts = Text.Split([Time Periods], "-"),
+            dt =
+                if List.Count(parts) = 2 then
+                    let
+                        y = "20" & Text.Start(parts{0}, 2),
+                        m = 1 + List.PositionOf({"JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"}, Text.Upper(parts{1}))
+                    in
+                        try Date.FromText(y & "-" & Text.PadStart(Text.From(m), 2, "0") & "-01") otherwise null
+                else
+                    null
+        in
+            dt,
+        type date
+    ),
+
+    // 📇 Reemplazar columna original por fecha
+    ConFecha = Table.RenameColumns(
+        Table.RemoveColumns(AddFirstDayOfMonth, {"Time Periods"}),
+        {{"FirstDayOfMonth","Time Periods"}}
+    ),
+
+    // 🔄 Unpivot
+    DatosDesplegados = Table.UnpivotOtherColumns(
+        ConFecha, {"Time Periods","Product ID","Area/GC"}, "Tipo de Forecast", "Valor"
+    ),
+
+    // 🔢 Conversión robusta de 'Valor'
+    #"Valor a texto"          = Table.TransformColumnTypes(DatosDesplegados, {{"Valor", type text}}),
+    #"Quitar separador miles" = Table.TransformColumns(#"Valor a texto", {{"Valor", each Text.Replace(_, ",", ""), type text}}),
+    #"Valor a número"         = Table.TransformColumns(#"Quitar separador miles", {{"Valor", each Number.FromText(_, "en-US"), type number}}),
+
+    // 📊 Orden final
+    ColumnasReordenadas = Table.ReorderColumns(#"Valor a número",
+        {"Time Periods","Product ID","Area/GC","Tipo de Forecast","Valor"})
+in
+    ColumnasReordenadas
+
+- ZBP
+
+let
+    años = {2025,2026},
+    BaseUrl = "https://my308646-api.scmibp1.ondemand.com",
+
+    ObtenerDatosPorAño = (año as number) as table =>
+        let
+            Response = Web.Contents(
+                BaseUrl,
+                [
+                    RelativePath = "sap/opu/odata/IBP/EXTRACT_ODATA_SRV/MOLIBP",
+                    Query = [
+                        #"$select" = "PERIODID3,PRDID,ZAREAGC,ZPLANANUAL,UOMTOID",
+                        #"$filter" = "PERIODID1 eq '" & Text.From(año) & "' and UOMTOID eq 'UMG' and ZVIGENCIA eq '1' and ZAREAFCST ne 'Comex' and ZCLIENTEBOCA eq 'Cliente'",
+                        #"$format" = "json"
+                    ],
+                    Headers = [Accept = "application/json"]
+                ]
+            ),
+            Json = Json.Document(Response),
+            Data = try Json[d][results] otherwise {},
+            Tabla = Table.FromRecords(Data)
+        in
+            Tabla,
+
+    DatosPorAño = List.Transform(años, each ObtenerDatosPorAño(_)),
+    DatosCombinados = Table.Combine(DatosPorAño),
+
+    OrigenSinColumnas = Table.RemoveColumns(DatosCombinados, {"__metadata","UOMTOID"}),
+
+    OrigenRenombrado = Table.RenameColumns(OrigenSinColumnas, {
+        {"PERIODID3", "Time Periods"},
+        {"PRDID", "Product ID"},
+        {"ZAREAGC", "Area/GC"}
+    }),
+
+    AddFirstDayOfMonth = Table.AddColumn(OrigenRenombrado, "FirstDayOfMonth", each 
+        let
+            dateValue = Text.Split([Time Periods], "-"),
+            validDate = if List.Count(dateValue) = 2 then
+                let
+                    year = "20" & Text.Start(dateValue{0}, 2),
+                    monthAbbr = Text.Upper(dateValue{1}),
+                    monthNumber = 
+                        if monthAbbr = "JAN" then 1
+                        else if monthAbbr = "FEB" then 2
+                        else if monthAbbr = "MAR" then 3
+                        else if monthAbbr = "APR" then 4
+                        else if monthAbbr = "MAY" then 5
+                        else if monthAbbr = "JUN" then 6
+                        else if monthAbbr = "JUL" then 7
+                        else if monthAbbr = "AUG" then 8
+                        else if monthAbbr = "SEP" then 9
+                        else if monthAbbr = "OCT" then 10
+                        else if monthAbbr = "NOV" then 11
+                        else if monthAbbr = "DEC" then 12
+                        else null,
+                    dateFormat = year & "-" & Text.PadStart(Text.From(monthNumber), 2, "0") & "-01",
+                    firstDay = if monthNumber <> null then Date.FromText(dateFormat) else null
+                in
+                    firstDay
+            else
+                null
+        in
+            validDate, type date),
+
+    RemoveOldColumn = Table.RemoveColumns(AddFirstDayOfMonth, {"Time Periods"}),
+
+    // 🔢 Conversión robusta de 'Plan Anual'
+    #"Convertir a texto" = Table.TransformColumnTypes(RemoveOldColumn, {{"ZPLANANUAL", type text}}),
+    #"Quitar separador de miles" = Table.TransformColumns(#"Convertir a texto", {
+        {"ZPLANANUAL", each Text.Replace(_, ",", ""), type text}
+    }),
+    #"Convertir a número" = Table.TransformColumns(#"Quitar separador de miles", {
+        {"ZPLANANUAL", each Number.FromText(_, "en-US"), type number}
+    }),
+
+    RenameColumn = Table.RenameColumns(#"Convertir a número", {
+        {"FirstDayOfMonth", "Time Periods"},
+        {"ZPLANANUAL", "Plan Anual"}
+    }),
+
+    ColumnasReordenadas = Table.ReorderColumns(RenameColumn, {
+        "Time Periods", "Product ID", "Area/GC", "Plan Anual"
+    })
+in
+    ColumnasReordenadas
+
+- ZE&P
+
+let
+    FechaActual = Date.From(Date.StartOfMonth(DateTime.LocalNow())),
+    PeriodoActual = Date.ToText(FechaActual, "yy-MMM", "en-US"),
+    BaseUrl = "https://my308646-api.scmibp1.ondemand.com",
+
+    Response = Web.Contents(
+        BaseUrl,
+        [
+            RelativePath = "sap/opu/odata/IBP/EXTRACT_ODATA_SRV/MOLIBP",
+            Query = [
+                #"$select" = "PERIODID3,PRDID,ZAREAGC,ZENTREGADO,ZPENDIENTESMTH,ZENTREGAPENDIENTEMTH,UOMTOID",
+                #"$filter" = "PERIODID3 eq '" & PeriodoActual & "' and UOMTOID eq 'UMG' and ZVIGENCIA eq '1' and ZAREAFCST ne 'Comex' and ZCLIENTEBOCA eq 'Cliente'",
+                #"$format" = "json"
+            ],
+            Headers = [Accept = "application/json"]
+        ]
+    ),
+
+    Json = Json.Document(Response),
+    Data = Json[d][results],
+    Tabla = Table.FromRecords(Data),
+    OrigenSinColumnas = Table.RemoveColumns(Tabla, {"__metadata","UOMTOID"}),
+
+    OrigenRenombrado = Table.RenameColumns(OrigenSinColumnas, {
+        {"PERIODID3", "Time Periods"},
+        {"PRDID", "Product ID"},
+        {"ZAREAGC", "Area/GC"},
+        {"ZENTREGADO", "Entregado"},
+        {"ZPENDIENTESMTH", "Pendiente"},
+        {"ZENTREGAPENDIENTEMTH", "E+P"}
+    }),
+
+    AddFirstDayOfMonth = Table.AddColumn(OrigenRenombrado, "FirstDayOfMonth", each 
+        let
+            dateValue = Text.Split([Time Periods], "-"),
+            validDate = if List.Count(dateValue) = 2 then
+                let
+                    year = "20" & Text.Start(dateValue{0}, 2),
+                    monthAbbr = Text.Upper(dateValue{1}),
+                    monthNumber = 
+                        if monthAbbr = "JAN" then 1
+                        else if monthAbbr = "FEB" then 2
+                        else if monthAbbr = "MAR" then 3
+                        else if monthAbbr = "APR" then 4
+                        else if monthAbbr = "MAY" then 5
+                        else if monthAbbr = "JUN" then 6
+                        else if monthAbbr = "JUL" then 7
+                        else if monthAbbr = "AUG" then 8
+                        else if monthAbbr = "SEP" then 9
+                        else if monthAbbr = "OCT" then 10
+                        else if monthAbbr = "NOV" then 11
+                        else if monthAbbr = "DEC" then 12
+                        else null,
+                    dateFormat = year & "-" & Text.PadStart(Text.From(monthNumber), 2, "0") & "-01",
+                    firstDay = if monthNumber <> null then Date.FromText(dateFormat) else null
+                in
+                    firstDay
+            else
+                null
+        in
+            validDate, type date),
+
+    // 🔢 Transformación segura de valores numéricos
+    #"Convertir columnas a texto" = Table.TransformColumnTypes(AddFirstDayOfMonth, {
+        {"Entregado", type text},
+        {"Pendiente", type text},
+        {"E+P", type text}
+    }),
+    #"Limpiar separador de miles" = Table.TransformColumns(#"Convertir columnas a texto", {
+        {"Entregado", each Text.Replace(_, ",", ""), type text},
+        {"Pendiente", each Text.Replace(_, ",", ""), type text},
+        {"E+P", each Text.Replace(_, ",", ""), type text}
+    }),
+    #"Convertir a número" = Table.TransformColumns(#"Limpiar separador de miles", {
+        {"Entregado", each Number.FromText(_, "en-US"), type number},
+        {"Pendiente", each Number.FromText(_, "en-US"), type number},
+        {"E+P", each Number.FromText(_, "en-US"), type number}
+    }),
+
+    RemoveOldColumn = Table.RemoveColumns(#"Convertir a número", {"Time Periods"}),
+    RenameColumn = Table.RenameColumns(RemoveOldColumn, {{"FirstDayOfMonth", "Time Periods"}}),
+    ColumnasReordenadas = Table.ReorderColumns(RenameColumn, {
+        "Time Periods", "Product ID", "Area/GC", "Entregado", "Pendiente", "E+P"
+    })
+in
+    ColumnasReordenadas
+
+- ZPRODUCT
+
+let
+    BaseUrl = "https://my308646-api.scmibp1.ondemand.com",
+
+    Response = Web.Contents(
+        BaseUrl,
+        [
+            RelativePath = "sap/opu/odata/IBP/EXTRACT_ODATA_SRV/MOLIBP",
+            Query = [
+                #"$select" = "PRDID,ZBIGDIVISION,ZBIGBUSINESS,ZBRAND,ZDEMFAMILY,ZPRDFAMILYID,PRDFAMILY,PRDDESCR,ZESTADO,ZVIGENCIA,ACTUALSQTY,UOMTOID",
+                #"$filter" = "UOMTOID eq 'CAJ'",
+                #"$format" = "json"
+            ],
+            Headers = [
+                Accept = "application/json"
+            ]
+        ]
+    ),
+
+    Json = Json.Document(Response),
+    Data = Json[d][results],
+    Tabla = Table.FromRecords(Data),
+    #"Columnas quitadas" = Table.RemoveColumns(Tabla,{"__metadata"}),
+
+    // Conversión robusta de ACTUALSQTY
+    #"ACTUALSQTY como texto" = Table.TransformColumnTypes(#"Columnas quitadas",{{"ACTUALSQTY", type text}}),
+    #"Quitar separador de miles" = Table.TransformColumns(#"ACTUALSQTY como texto", {
+        {"ACTUALSQTY", each Text.Replace(_, ",", ""), type text}
+    }),
+    #"Convertir a número" = Table.TransformColumns(#"Quitar separador de miles", {
+        {"ACTUALSQTY", each Number.FromText(_, "en-US"), type number}
+    }),
+
+    ProductosRenombrados = Table.RenameColumns(#"Convertir a número", {
+        {"PRDID", "Product ID"},
+        {"ZBIGDIVISION", "Gran División"},
+        {"ZBIGBUSINESS", "Gran Negocio"},
+        {"ZBRAND", "Negocio"},
+        {"ZDEMFAMILY", "Demand Family"},
+        {"ZPRDFAMILYID", "Family ID"},
+        {"PRDFAMILY", "Familia"},
+        {"PRDDESCR", "Product Desc"},
+        {"ZESTADO", "Estado"},
+        {"ZVIGENCIA", "Vigencia"}
+    }),
+    #"Filtered Rows" = Table.SelectRows(ProductosRenombrados, each true)
+in
+    #"Filtered Rows"
+
+- ZCUSTOMER
+
+let
+    // 🌐 URL base del servicio
+    BaseUrl = "https://my308646-api.scmibp1.ondemand.com",
+
+    // 📦 Llamada a la entidad ZCUSTOMER
+    Response = Web.Contents(
+        BaseUrl,
+        [
+            RelativePath = "sap/opu/odata/IBP/EXTRACT_ODATA_SRV/MOLIBP",
+            Query = [
+                #"$filter" = "UOMTOID eq 'CAJ' and ZCLIENTEBOCA eq 'Cliente'",
+                #"$select" = "CUSTID,ZAREACOMERCIAL,ZAREAFCST,ZAREAGC,ZCANAL,CUSTCHANNEL,ZCLIENTEBOCA,CUSTDESCR,CUSTGROUP,ACTUALSQTY,UOMTOID",
+                #"$format" = "json"
+            ],
+            Headers = [Accept = "application/json"]
+        ]
+    ),
+
+    // 🧱 Procesamiento del JSON
+    Json = Json.Document(Response),
+    Data = Json[d][results],
+    Tabla = Table.FromRecords(Data),
+
+    // 🧹 Limpieza y transformación
+    #"Columnas quitadas" = Table.RemoveColumns(Tabla, {"__metadata"}),
+
+    // 👷‍♂️ Conversión robusta de ACTUALSQTY
+    #"ACTUALSQTY como texto" = Table.TransformColumnTypes(#"Columnas quitadas",{{"ACTUALSQTY", type text}}),
+    #"Quitar separador de miles" = Table.TransformColumns(#"ACTUALSQTY como texto", {
+        {"ACTUALSQTY", each Text.Replace(_, ",", ""), type text}
+    }),
+    #"Convertir a número" = Table.TransformColumns(#"Quitar separador de miles", {
+        {"ACTUALSQTY", each Number.FromText(_, "en-US"), type number}
+    }),
+
+    // ✏️ Renombrado de columnas
+    ClientesRenombrados = Table.RenameColumns(#"Convertir a número", {
+        {"CUSTID", "Customer ID"},
+        {"ZAREACOMERCIAL", "Area Comercial"},
+        {"ZAREAFCST", "Area Forecast"},
+        {"ZAREAGC", "Area/GC"},
+        {"ZCANAL", "Directa/Indirecta"},
+        {"CUSTCHANNEL", "Canal de Distribucion"},
+        {"ZCLIENTEBOCA", "Cliente/Boca"},
+        {"CUSTDESCR", "Customer Description"},
+        {"CUSTGROUP", "Customer Group"}
+    })
+in
+    ClientesRenombrados
