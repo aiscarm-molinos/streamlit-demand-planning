@@ -8,15 +8,11 @@ App Streamlit que replica funcionalmente dos tableros de Power BI de SAP IBP (Mo
 - **Tablero Forecast IBP**: Histórico de ventas, Forecast, Plan Anual, Propuestas FCST.
 - **Tablero Forecast Accuracy IBP**: Reporte Accuracy, Segmentación SKU, Ranking Clientes, Glosario.
 
-No es una réplica visual pixel-perfect — es funcional (mismos filtros, mismos números, gráficos con Plotly en vez de Power BI). Corre **local**, conectada **en vivo** a SAP IBP (OData) y AWS Athena (Data Lake). Los dos `.pbix` originales quedan en la raíz del repo como referencia.
+No es una réplica visual pixel-perfect — es funcional (mismos filtros, mismos números, gráficos con Plotly en vez de Power BI). Corre **local**, conectada **en vivo** a SAP IBP (OData) y AWS Athena (Data Lake).
 
-**Fuente de verdad de este documento**: las queries M (Power Query) reales de ambos tableros, pasadas por el usuario en `tablas_forecast_ibp.txt` y `tablas_forecast_accuracy_ibp.txt` (raíz del repo) — **no están gitignoreadas a propósito, son documentación**. Antes de asumir un key figure, UOM o filtro por analogía con otro repo Molinos, mirar esos dos archivos primero: son lo que Power BI realmente ejecuta contra SAP, no una inferencia.
+**Nota sobre las fuentes originales (2026-09-14, a pedido del usuario)**: este proyecto arrancó con archivos fuente en la raíz del repo -- las queries M reales (`tablas_forecast_ibp.txt`/`tablas_forecast_accuracy_ibp.txt`, en `docs/`), el informe de diseño (`Reporte – Ranking Forecast Accuracy.docx`), capturas del Power BI real (`forecast-ibp-*.png`/`forecast-accuracy-*.png`) y los dos `.pbix` originales. Todo eso se **borró del repo** una vez que su contenido quedó completamente destilado acá y en `README.md` -- este documento (y el código, que es la traducción fiel de esas queries M) es ahora la ÚNICA fuente de verdad, no hace falta ir a buscar un archivo que ya no existe. Si en algún momento hace falta re-verificar algo contra la fuente original (un nombre de campo dudoso, un layout exacto), pedirle al usuario que la vuelva a pasar -- no asumir por analogía con otro repo Molinos mientras tanto.
 
-**Fuente de verdad del diseño del "Tablero Forecast Accuracy IBP"** (páginas 5/6/7): el informe `Reporte – Ranking Forecast Accuracy.docx` (raíz del repo, no gitignoreado) explica la metodología de negocio (ventana U4M, criterio de segmentación, escenarios de proyección), y las capturas `forecast-accuracy-*.png` (raíz del repo) muestran el layout real del Power BI actual. El docx es el documento de diseño que precedió al tablero ("durante el mes en curso se trabajará en desarrollar un tablero de Power BI...") -- ante cualquier duda entre el docx y las capturas, **las capturas ganan** (son "cómo se ve hoy", el docx puede tener detalle que no se terminó de implementar o cambió).
-
-**Fuente de verdad del diseño del "Tablero Forecast IBP"** (páginas 1-4): las capturas `forecast-ibp-*.png` (raíz del repo) -- `historico.png`, `forecast.png`, `plan-anual.png`, `propuestas.png`. Sin documento de diseño aparte para este tablero, solo las capturas.
-
-### Hallazgos de las capturas `forecast-ibp-*.png` (no obvios, ya corregidos)
+### Hallazgos del Power BI real -- Tablero Forecast IBP (no obvios, ya corregidos)
 
 - **"Histórico de ventas" tiene DOS series de venta real, no una**: "Histórico" (ADJUSTEDACTUALSQTY, vía `get_historico_y_forecast`) y "Entregado" (ACTUALSQTY sin ajustar, vía `get_historico_ventas_mensual` -- la misma función que ya se usaba para accuracy, reutilizada acá). El bar chart las muestra juntas.
 - **"Forecast - Estimado" (página 2) NO muestra el waterfall completo** -- solo 2 series: "Historico Ajustado" (pasado) y "12 - Estimado Consensuado" (futuro). El waterfall completo (7 tipos) es exclusivo de **"Propuestas de Forecast" (página 4)**, que sí tiene el selector de Tipo. Antes tenía las 8 categorías en ambas páginas.
@@ -25,6 +21,7 @@ No es una réplica visual pixel-perfect — es funcional (mismos filtros, mismos
 - **"Planificación Anual vs Avance" (página 3, antes "Plan Anual") es un KPI grande con gap %, no una tabla chica**: "Histórico + FCST" (número grande, rojo si por debajo del objetivo) vs "Objetivo" (Plan Anual), con el % de brecha -- implementado con `st.metric(delta=...)`. El gráfico de Plan Anual vs Histórico+FCST usa `charts.area_superpuesta` (áreas superpuestas, NO apiladas) porque ambas series se solapan en el tiempo -- apilarlas (como hacía `area_chart_por_tipo`) las sumaría mal.
 - El sidebar de este tablero está agrupado en 3 secciones "Período" (Año, Mes)/"Clientes" (Area Comercial, Area/GC, Customer Group)/"Productos" (Gran División, Gran Negocio, Negocio, Demand Family, Familia, Categoria, Product ID) -- ver `src/filters.py::render_sidebar_filters` (`FILTROS_IBP_CLIENTES`/`FILTROS_IBP_PRODUCTOS`). Las capturas reales muestran Año/Mes como slicers arriba del contenido en vez de en el sidebar, pero se dejaron en el sidebar bajo "Período" por consistencia con el resto de la app -- Streamlit no tiene un lugar natural para "slicers de página" fuera del sidebar. Sigue siendo un sidebar DISTINTO al de Accuracy (más filtros, "Área Comercial"/"Area/GC" en vez de solo estas 2, "Product ID" incluido) -- la agrupación visual es la misma idea en los dos tableros, el contenido de cada sección no.
 - El filtro "Año" real es un **range slider** (ej. 2021-2027), no un multiselect -- `src/filters.py` sigue usando multiselect de años individuales; funciona pero no es igual de fidedigno. No se cambió (bajo prioridad frente a los fixes numéricos).
+- Cada página del Power BI real muestra un banner de texto (ej. "Gran División: Snacks") arriba del gráfico principal con la Gran División actualmente filtrada -- no implementado en esta app (bajo prioridad, cosmético). Las páginas 2 y 4 sí muestran las tarjetas KPI y el gráfico principal correctamente, solo falta ese banner.
 - Las capturas muestran histórico desde 2021 (~5-6 años); `cache.py::MESES_HISTORICOS=24` (2 años) es deliberadamente más corto por costo de carga -- ver la sección de rendimiento más abajo antes de agrandarlo.
 
 ## Cómo correr la app
@@ -60,11 +57,15 @@ Ver `.env.example` para la plantilla completa.
 
 ### UOM y filtros de negocio estándar
 
-**UOM = `UMG` para todas las series** (histórico, forecast, plan, E+P). Solo `CAJ` para:
+**UOM = `UMG` para todas las series** (histórico, forecast, plan, E+P) **y para master data de cliente** (`customer_sap_ibp`, tabla ZCUSTOMER/IBP-Customer). Solo `CAJ` para:
 - Master data de producto (`product_sap_ibp`, tabla ZPRODUCT/IBP-Product).
 - Margen Unitario (`margen_unitario_sap_ibp`).
 
 Esto fue un bug real: al principio yo tenía `CAJ` por defecto en todas las series y traía datos mal/vacíos. **No volver a poner CAJ como default de una serie sin confirmarlo contra las queries M.**
+
+**Detalle no obvio ya resuelto**: las queries M reales de master data de cliente NO coincidían entre los dos tableros -- la del Tablero Forecast IBP (`ZCUSTOMER`) pedía `UOMTOID eq 'CAJ'`, la del Tablero Accuracy (`IBP - Customer`) pedía `UOMTOID eq 'UMG'` para la MISMA tabla. `customer_sap_ibp()` (compartida por los dos tableros en esta app) usa `UMG` -- la variante de Accuracy, consistente con la regla general de arriba. Si algún día aparece un caso donde el maestro de clientes trae datos raros/vacíos, este es el primer sospechoso a revisar.
+
+**Margen Unitario NO lleva los filtros de negocio estándar** (`ZVIGENCIA`/`ZAREAFCST`/`ZCLIENTEBOCA`) -- la query M real de `margen_unitario_sap_ibp` es una consulta directa por `UOMTOID`+`PERIODID3`+`CURRTOID` nada más, sin pasar por `_consulta_mensual`/`FILTROS_BASE_*`. No agregarle esos filtros "por consistencia" -- no es como está en el Power BI real.
 
 Filtros de negocio que van SIEMPRE (hardcodeados en `extract_odata_sap_ibp.py::FILTROS_BASE_EQ`/`FILTROS_BASE_NEQ`, no hace falta pasarlos manualmente):
 ```
@@ -95,6 +96,10 @@ Confirmado dos veces independientemente (queries M reales + pruebas contra el te
 - Para tener "Area Comercial" en una página (ej. Ranking Clientes), se hace merge de `ZAREAGC` contra `get_customer_master()` (cacheada, rápida) — nunca pidiéndoselo a una consulta de key figures.
 
 **Si en el futuro hace falta más detalle de cliente que ZAREAGC, no asumir que es posible — probar primero con una consulta chica y medir tiempo antes de construir sobre esa base.**
+
+### Simplificación conocida: maestro de producto sin snapshot temporal
+
+La query M real de "IBP - Product" (Tablero Accuracy) filtra el maestro de producto por `PERIODID3` = el mes anterior cerrado (con una regla de corte: si hoy es después del día 5 del mes, usa el mes pasado; si no, el anteanterior) -- es decir, el Power BI real toma una FOTO de la jerarquía de producto a una fecha de corte específica, no "la jerarquía tal como está hoy". `product_sap_ibp()` en esta app **no replica ese snapshot** -- trae la jerarquía sin filtrar por período (igual que la query M del Tablero Forecast IBP, que tampoco lo tiene). En la práctica esto rara vez importa (Gran División/Familia de un SKU no suelen cambiar mes a mes), pero si algún reporte de accuracy da un número raro para un producto que cambió de división/familia recientemente, este es un sospechoso a revisar.
 
 ### Key figures (nombre real de campo OData, confirmado)
 
@@ -217,7 +222,7 @@ Usaba `ZFCSTCOMERCIALESTIMADO` (`cache.get_estimado_comercial`, "Ajuste Comercia
 ### Otros ajustes puntuales de esta tanda
 
 - **"Entregado" en "Histórico de ventas" (página 1)**: ahora SOLO se muestra para el mes en curso (antes traía todo el histórico junto con "Histórico") -- filtro `PERIODID3 == periodos_futuros_mes(1)[0]` sobre `df_entregado_f` antes de armar la serie del bar chart.
-- **Plan Anual arranca en enero 2025** (`3_Plan_Anual.py::PLAN_ANUAL_DESDE`): el usuario aclaró que el Plan Anual recién se empezó a conformar desde esa fecha, así que traer períodos anteriores no aporta -- se filtra `df_plan`/`df_ancho` a `Date >= 2025-01-01` ANTES de armar el sidebar (así "Año"/"Mes" tampoco ofrecen años previos como opción). De paso se sacó la sección "Detalle por Año" (tabla al pie), no la pidió el usuario. **El filtro "Año" viene preseleccionado en el año en curso** (`anio_default=[pd.Timestamp.today().year]`, nuevo parámetro opcional de `render_sidebar_filters` -- las otras 3 páginas del Tablero IBP no lo pasan, siguen sin preselección).
+- **Plan Anual arranca en enero 2025** (`3_Plan_Anual.py::PLAN_ANUAL_DESDE`): el usuario aclaró que el Plan Anual recién se empezó a conformar desde esa fecha, así que traer períodos anteriores no aporta -- se filtra `df_plan`/`df_ancho` a `Date >= 2025-01-01` ANTES de armar el sidebar (así "Año"/"Mes" tampoco ofrecen años previos como opción). Esto coincide con la query M real de "ZBP" (Plan Anual), que hardcodea `años = {2025, 2026}` -- corrobora que el usuario tiene razón, el Plan Anual del Power BI real tampoco tiene datos antes de 2025. De paso se sacó la sección "Detalle por Año" (tabla al pie), no la pidió el usuario. **El filtro "Año" viene preseleccionado en el año en curso** (`anio_default=[pd.Timestamp.today().year]`, nuevo parámetro opcional de `render_sidebar_filters` -- las otras 3 páginas del Tablero IBP no lo pasan, siguen sin preselección).
 - **"Propuestas de Forecast" (página 4)**: el multiselect "Tipo" viene preseleccionado en `["Historico Ajustado", "01 - Forecast Estadístico", "12 - Estimado Consensuado"]` (antes las 8 categorías por default, saturando el gráfico) -- `TIPOS_DEFAULT` al tope del archivo.
 - **Segmentación SKU (página 6)**: la tabla ahora tiene alto dinámico (`height=min(38 + 35*(filas+1), 1200)`) en vez del alto chico fijo default de `st.dataframe`, para que se vean más filas sin scroll interno.
 
