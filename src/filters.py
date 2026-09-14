@@ -120,10 +120,11 @@ def render_sidebar_filters(df: pd.DataFrame, key_prefix: str = "", anio_default:
     con el resto de la app -- Streamlit no tiene un lugar natural para
     "slicers de página" fuera del sidebar).
 
-    ``anio_default``: años preseleccionados en el multiselect "Año" (default
-    ``None`` = sin preselección, como en la mayoría de las páginas). Usado
-    por "Plan Anual" (año en curso) -- las páginas que no lo necesitan no
-    tienen que pasarlo.
+    ``anio_default``: año preseleccionado en el slider "Año" -- una lista de
+    un elemento por compatibilidad con el llamador (`[año]`), colapsa el
+    rango a ese único año (default ``None`` = rango completo, como en la
+    mayoría de las páginas). Usado por "Plan Anual" (año en curso) -- las
+    páginas que no lo necesitan no tienen que pasarlo.
     """
     if df.empty:
         return {}
@@ -136,10 +137,17 @@ def render_sidebar_filters(df: pd.DataFrame, key_prefix: str = "", anio_default:
             st.subheader("Período")
         if "Año" in df.columns:
             anios = sorted(df["Año"].dropna().unique().tolist())
-            default_anio = [a for a in (anio_default or []) if a in anios]
-            elegido = st.multiselect("Año", anios, default=default_anio, key=f"{key_prefix}_Año")
-            if elegido:
-                seleccion["Año"] = elegido
+            if len(anios) > 1:
+                anio_min, anio_max = anios[0], anios[-1]
+                default_range = (
+                    (anio_default[0], anio_default[0])
+                    if anio_default and anio_default[0] in anios
+                    else (anio_min, anio_max)
+                )
+                rango = st.slider("Año", min_value=anio_min, max_value=anio_max, value=default_range, key=f"{key_prefix}_Año")
+                elegido = [a for a in anios if rango[0] <= a <= rango[1]]
+                if len(elegido) < len(anios):
+                    seleccion["Año"] = elegido
         if "Mes" in df.columns:
             meses = sorted(df["Mes"].dropna().unique().tolist())
             elegido = st.multiselect("Mes", meses, default=[], key=f"{key_prefix}_Mes")

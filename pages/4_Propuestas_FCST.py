@@ -46,6 +46,10 @@ if df_f.empty:
     st.warning("No hay datos para los filtros seleccionados.")
     st.stop()
 
+division_actual = filtros.get("ZBIGDIVISION", [None])[0]
+if division_actual:
+    st.caption(f"Gran División: {division_actual}")
+
 serie = df_f.groupby(["Date", "Tipo"], as_index=False)["Valor"].sum()
 st.plotly_chart(charts.line_chart(serie, "Date", "Valor", "Tipo", title="Suma de Valor"), width="stretch")
 

@@ -41,6 +41,10 @@ if df_ancho_f.empty:
 # cache.melt_historico_y_forecast).
 df_f = cache.melt_historico_y_forecast(df_ancho_f, tipos_forecast=("ZFCSTESTIMADO",))
 
+division_actual = filtros.get("ZBIGDIVISION", [None])[0]
+if division_actual:
+    st.caption(f"Gran División: {division_actual}")
+
 serie = df_f.groupby(["Date", "Tipo"], as_index=False)["Valor"].sum()
 # area_superpuesta (no area_chart_por_tipo/apilada): Historico Ajustado y
 # "12 - Estimado Consensuado" NO se solapan en el tiempo (por diseño, ver

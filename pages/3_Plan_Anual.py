@@ -10,9 +10,9 @@ Arranca en enero 2025 (``PLAN_ANUAL_DESDE``) -- a pedido del usuario, el
 Plan Anual recién se empezó a conformar desde esa fecha, así que traer
 períodos anteriores no tiene sentido de negocio (aunque `get_plan_anual`
 técnicamente pida un rango más amplio por diseño, ver `cache.py`). El
-filtro "Año" del sidebar viene preseleccionado en el año en curso
-(``anio_default``) -- a pedido del usuario, sigue siendo un multiselect
-(se puede agregar/sacar años), solo cambia el valor con el que arranca.
+filtro "Año" del sidebar (range slider, ver `src/filters.py`) viene
+preseleccionado en el año en curso (``anio_default``, colapsa el rango a un
+único año) -- se puede volver a ampliar el rango libremente.
 """
 
 import streamlit as st
