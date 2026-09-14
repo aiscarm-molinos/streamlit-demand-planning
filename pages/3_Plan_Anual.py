@@ -38,6 +38,15 @@ if not df_plan.empty:
 if not df_ancho.empty:
     df_ancho = df_ancho[df_ancho["Date"] >= PLAN_ANUAL_DESDE]
 
+df_master, es_demo_master, _ = cache.get_or_demo(cache.get_customer_master, demo_data.customer_master_demo)
+if not es_demo_master and "ZAREAGC" in df_master.columns and "ZAREACOMERCIAL" in df_master.columns:
+    # Una fila por ZAREAGC (ver cache.mapa_area_comercial) -- nunca mergear
+    # el maestro completo sin colapsar, fanoutea filas (hasta 31x).
+    mapa_area = cache.mapa_area_comercial(df_master)
+    df_plan = df_plan.merge(mapa_area, on="ZAREAGC", how="left")
+    if not df_ancho.empty:
+        df_ancho = df_ancho.merge(mapa_area, on="ZAREAGC", how="left")
+
 df_categoria, es_demo_categoria, _ = cache.get_or_demo(cache.get_categoria_producto, demo_data.categoria_producto_demo)
 if not es_demo_categoria and "sku" in df_categoria.columns and "grupo_material_3" in df_categoria.columns:
     mapa_categoria = df_categoria[["sku", "grupo_material_3"]].drop_duplicates().rename(columns={"sku": "PRDID", "grupo_material_3": "Categoria"})

@@ -74,6 +74,45 @@ def get_categoria_producto() -> pd.DataFrame:
     return categoria_producto_datalake()
 
 
+def mapa_area_comercial(df_master: pd.DataFrame) -> pd.DataFrame:
+    """
+    Una fila por ZAREAGC (nunca más), con ZAREACOMERCIAL/CUSTGROUP colapsados
+    a su valor más frecuente -- lista para mergear ``on="ZAREAGC"`` contra
+    cualquier serie de key figures sin duplicar filas.
+
+    **Bug real encontrado y corregido (2026-09-14)**: ``customer_sap_ibp()``
+    trae el maestro a grano CUSTID, y ni ZAREACOMERCIAL ni CUSTGROUP son
+    funcionalmente dependientes de ZAREAGC en los datos reales -- confirmado
+    contra el tenant: 13 de 34 ZAREAGC agrupan clientes de MÁS DE UNA
+    ZAREACOMERCIAL, 18 de 34 de MÁS DE UN CUSTGROUP, hasta 31 combinaciones
+    distintas bajo un mismo ZAREAGC (ej. "Litoral"). El patrón de merge
+    anterior (``df_master[cols].drop_duplicates()`` seguido de
+    ``merge(..., on="ZAREAGC")``) generaba una fila del `mapa_area` por CADA
+    combinación encontrada, y el merge fanoutaba cada fila de la serie
+    original una vez por cada una -- inflando cualquier suma (Entregado,
+    Forecast, Accuracy) que no filtrara explícitamente por Cliente, hasta
+    ~31x en el peor caso. Esto ya afectaba el merge de ZAREACOMERCIAL previo
+    a esta sesión (páginas 1/5/6/7), pasó inadvertido porque los datos demo
+    tienen una relación 1:1 limpia; se hizo evidente al agregar CUSTGROUP
+    (grano aún más fino, blowup mucho mayor) y una página tardó minutos en
+    vez de segundos en renderizar.
+
+    **Fix**: colapsar a la moda (valor más frecuente por cantidad de CUSTID)
+    de cada atributo por ZAREAGC -- preserva la integridad de las sumas (1
+    fila de por vida por ZAREAGC, nunca fan-out) a costa de una aproximación
+    deliberada en el filtro: un ZAREAGC que reparte clientes entre varias
+    Area Comercial/Customer Group muestra solo la predominante, así que
+    filtrar por una de las otras puede no traer ese ZAREAGC aunque en la
+    realidad sí tenga algo de esa combinación. Se prefiere esto a la
+    alternativa (fan-out) porque romper sumas es peor que un filtro
+    aproximado, y es consistente con la simplificación de grano ya aceptada
+    en el resto de la app (ver módulo ``cache.py``, grano de cliente).
+    """
+    cols = [c for c in ["ZAREACOMERCIAL", "CUSTGROUP"] if c in df_master.columns]
+    moda = lambda s: s.mode().iat[0] if not s.mode().empty else pd.NA
+    return df_master.groupby("ZAREAGC", as_index=False)[cols].agg(moda)
+
+
 @st.cache_data(ttl=TTL_SERIES, persist="disk", show_spinner="Consultando SAP IBP (waterfall + histórico + comercial)...")
 def get_forecast_waterfall_mensual() -> pd.DataFrame:
     """

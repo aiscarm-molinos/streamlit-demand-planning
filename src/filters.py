@@ -9,13 +9,21 @@ filtros por sección -- son sidebars reales distintos en el Power BI, no una
 inconsistencia:
 
 - ``render_sidebar_filters``: Tablero Forecast IBP (páginas 1-4) -- Período
-  (Año, Mes), Clientes (Area Comercial, Area/GC, Customer Group), Productos
-  (Gran División, Gran Negocio, Negocio, Demand Family, Familia, Categoria,
-  Product ID).
+  (Año, Mes), Clientes, Productos.
 - ``render_sidebar_accuracy``: Tablero Forecast Accuracy IBP (páginas 5-7) --
-  Período (multiselect de meses, no Año), Clientes (Area Comercial, Area/GC),
-  Productos (Gran División, Gran Negocio, Categoria, Familia) -- menos
-  filtros, sin Negocio/Demand Family/Product ID/Customer Group/Año.
+  Período (multiselect de meses, no Año/Mes -- ver más abajo), Clientes,
+  Productos.
+
+**"Clientes" y "Productos" son EXACTAMENTE los mismos filtros en los dos
+tableros** (``FILTROS_IBP_CLIENTES``/``FILTROS_IBP_PRODUCTOS``, reutilizados
+por las dos funciones -- 2026-09-14, a pedido del usuario: antes Accuracy
+tenía un subconjunto más chico -- sin Customer Group/Negocio/Demand
+Family/Product ID -- calcado de lo que mostraban sus capturas reales, pero
+el usuario prefirió consistencia entre tableros por sobre fidelidad pixel a
+pixel acá). Lo único que sigue siendo distinto entre los dos sidebars es la
+sección "Período" (Año+Mes vs. multiselect de meses -- ver
+``render_sidebar_accuracy``), que es una diferencia funcional real (U4M
+dinámico) y no un límite de filtros de dimensión.
 
 En los dos, "Gran División" NO es un multiselect más -- es un selectbox
 obligatorio (siempre hay una división elegida, nunca "Todas"), restringido a
@@ -23,6 +31,21 @@ obligatorio (siempre hay una división elegida, nunca "Todas"), restringido a
 "Alimentos") -- ver `_selectbox_gran_division`. Ranking Clientes es la única
 página que lo desactiva (``incluir_gran_division=False``) porque necesita
 ver las 3 divisiones a la vez.
+
+**Filtros en cascada (2026-09-14, a pedido del usuario)**: dentro de cada
+sección ("Clientes", "Productos"), cada filtro solo ofrece las opciones que
+efectivamente aparecen en el DataFrame ya recortado por los filtros
+ANTERIORES de esa misma sección, en el orden en que están listados en
+``FILTROS_IBP_CLIENTES``/``FILTROS_IBP_PRODUCTOS``/etc. (que sigue el orden
+real de la jerarquía -- Gran División > Gran Negocio > Negocio > Demand
+Family > Familia > Product ID; Area Comercial > Area/GC > Customer Group).
+Ej.: elegir "Mayoristas" en Area Comercial deja en Area/GC SOLO las Área/GC
+ligadas a Mayoristas -- antes cada multiselect calculaba sus opciones sobre
+el DataFrame completo, sin mirar qué habían elegido los filtros de arriba.
+Ver ``_multiselects``. "Categoria" (grupo_material_3, de Athena) queda en la
+cascada de Productos en su posición de siempre (entre Familia y Product ID)
+aunque no sea parte de la jerarquía SAP -- no hay problema en que la
+cascada pase por ahí también.
 
 Cada página llama a la función que corresponda con su propio DataFrame ya
 cargado (los filtros ofrecidos son los que tengan sentido para las columnas
@@ -61,18 +84,41 @@ FILTROS_IBP_PRODUCTOS = [
     ("Product ID", "PRDID"),
 ]
 
-FILTROS_ACCURACY_CLIENTES = [
-    ("Area Comercial", "ZAREACOMERCIAL"),
-    ("Area/GC", "ZAREAGC"),
-]
-FILTROS_ACCURACY_PRODUCTOS = [
+# Jerarquía real de producto, de más agregado a más desagregado -- usada por
+# ``nivel_producto_mas_desagregado`` para el banner "Gran División: X" /
+# "Familia: X" de las páginas del Tablero Forecast IBP (Categoria queda
+# afuera a propósito: no es un nivel de la jerarquía SAP, es una
+# clasificación aparte de Athena, cruzada con la jerarquía, no anidada en
+# ella -- no tiene un lugar único en este orden agregado→desagregado).
+JERARQUIA_PRODUCTO = [
+    ("Gran División", "ZBIGDIVISION"),
     ("Gran Negocio", "ZBIGBUSINESS"),
-    ("Categoria", "Categoria"),
+    ("Negocio", "ZBRAND"),
+    ("Demand Family", "ZDEMFAMILY"),
     ("Familia", "PRDFAMILY"),
+    ("Product ID", "PRDID"),
 ]
 
 
-def _selectbox_gran_division(df: pd.DataFrame, key_prefix: str, seleccion: dict) -> None:
+def nivel_producto_mas_desagregado(filtros: dict) -> str | None:
+    """
+    "Gran División: Alimentos" o "Familia: X, Y" -- recorre
+    ``JERARQUIA_PRODUCTO`` de más desagregado a más agregado y devuelve
+    "Etiqueta: valores" del primer nivel con una selección explícita en
+    ``filtros`` (el usuario eligió algo puntual ahí, no "todas"). "Gran
+    División" es la única que SIEMPRE tiene un valor (selectbox
+    obligatorio), así que esta función siempre devuelve algo si `filtros`
+    viene de `render_sidebar_filters`/`render_sidebar_accuracy` -- ``None``
+    solo si ni siquiera eso está (df sin la columna, ej. df vacío).
+    """
+    for label, col in reversed(JERARQUIA_PRODUCTO):
+        valores = filtros.get(col)
+        if valores:
+            return f"{label}: {', '.join(str(v) for v in valores)}"
+    return None
+
+
+def _selectbox_gran_division(df: pd.DataFrame, key_prefix: str, seleccion: dict) -> str | None:
     """
     "Gran División" SIEMPRE con un valor elegido (nunca "Todas") y una sola
     selección a la vez -- default "Alimentos". Restringido a
@@ -80,15 +126,20 @@ def _selectbox_gran_division(df: pd.DataFrame, key_prefix: str, seleccion: dict)
     (ej. "MP, Semi y Subproductos"), ni siquiera aparece como opción, así que
     ``apply_filters`` la excluye de por sí en cuanto este filtro se aplica
     (que es siempre, al ser obligatorio).
+
+    Devuelve la división elegida (o ``None`` si no hay columna/opciones) --
+    el caller la usa para recortar el DataFrame ANTES de armar el resto de
+    los filtros de "Productos" (cascada, ver docstring del módulo).
     """
     if "ZBIGDIVISION" not in df.columns:
-        return
+        return None
     opciones = [d for d in GRANDES_DIVISIONES_VALIDAS if d in df["ZBIGDIVISION"].dropna().unique()]
     if not opciones:
-        return
+        return None
     index_default = opciones.index(GRAN_DIVISION_DEFAULT) if GRAN_DIVISION_DEFAULT in opciones else 0
     elegida = st.selectbox("Gran División", opciones, index=index_default, key=f"{key_prefix}_ZBIGDIVISION")
     seleccion["ZBIGDIVISION"] = [elegida]
+    return elegida
 
 
 def _con_ano_mes(df: pd.DataFrame) -> pd.DataFrame:
@@ -100,6 +151,14 @@ def _con_ano_mes(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _multiselects(df: pd.DataFrame, config: list, key_prefix: str, seleccion: dict) -> None:
+    """
+    En cascada: cada filtro de ``config`` recorta ``df`` antes de calcular
+    las opciones del SIGUIENTE de la lista -- elegir "Mayoristas" en Area
+    Comercial dejaría en Area/GC solo las Área/GC que en el DataFrame
+    filtrado a Mayoristas tengan al menos una fila (ver docstring del
+    módulo). El orden de ``config`` importa: tiene que ir de más agregado a
+    más desagregado.
+    """
     for label, col in config:
         if col not in df.columns:
             continue
@@ -109,6 +168,7 @@ def _multiselects(df: pd.DataFrame, config: list, key_prefix: str, seleccion: di
         elegido = st.multiselect(label, opciones, default=[], key=f"{key_prefix}_{col}")
         if elegido:
             seleccion[col] = elegido
+            df = df[df[col].isin(elegido)]
 
 
 def render_sidebar_filters(df: pd.DataFrame, key_prefix: str = "", anio_default: list = None) -> dict:
@@ -158,8 +218,9 @@ def render_sidebar_filters(df: pd.DataFrame, key_prefix: str = "", anio_default:
         _multiselects(df, FILTROS_IBP_CLIENTES, key_prefix, seleccion)
 
         st.subheader("Productos")
-        _selectbox_gran_division(df, key_prefix, seleccion)
-        _multiselects(df, FILTROS_IBP_PRODUCTOS, key_prefix, seleccion)
+        division = _selectbox_gran_division(df, key_prefix, seleccion)
+        df_productos = df[df["ZBIGDIVISION"] == division] if division else df
+        _multiselects(df_productos, FILTROS_IBP_PRODUCTOS, key_prefix, seleccion)
 
     return seleccion
 
@@ -223,12 +284,12 @@ def render_sidebar_accuracy(df: pd.DataFrame, key_prefix: str, incluir_gran_divi
                 meses_analisis = sorted(elegidos, key=periodid3_a_fecha)
 
         st.subheader("Clientes")
-        _multiselects(df, FILTROS_ACCURACY_CLIENTES, key_prefix, seleccion)
+        _multiselects(df, FILTROS_IBP_CLIENTES, key_prefix, seleccion)
 
         st.subheader("Productos")
-        if incluir_gran_division:
-            _selectbox_gran_division(df, key_prefix, seleccion)
-        _multiselects(df, FILTROS_ACCURACY_PRODUCTOS, key_prefix, seleccion)
+        division = _selectbox_gran_division(df, key_prefix, seleccion) if incluir_gran_division else None
+        df_productos = df[df["ZBIGDIVISION"] == division] if division else df
+        _multiselects(df_productos, FILTROS_IBP_PRODUCTOS, key_prefix, seleccion)
 
     return seleccion, meses_analisis
 

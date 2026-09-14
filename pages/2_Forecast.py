@@ -10,7 +10,7 @@ import streamlit as st
 
 from src import cache, charts
 from src.data import demo_data
-from src.filters import render_sidebar_filters, apply_filters
+from src.filters import render_sidebar_filters, apply_filters, nivel_producto_mas_desagregado
 from src.utils.listas_periodos import periodos_futuros_mes
 
 st.title("🔮 Forecast - Estimado")
@@ -20,6 +20,15 @@ if es_demo:
     st.warning(f"Mostrando datos de EJEMPLO (no hay conexión real a SAP IBP{f': {error}' if error else ''}). Es solo para previsualizar el diseño.", icon="🧪")
 
 df_ep, es_demo_ep, _ = cache.get_or_demo(cache.get_entregado_pendiente, demo_data.entregado_pendiente_demo)
+
+df_master, es_demo_master, _ = cache.get_or_demo(cache.get_customer_master, demo_data.customer_master_demo)
+if not es_demo_master and "ZAREAGC" in df_master.columns and "ZAREACOMERCIAL" in df_master.columns:
+    # Una fila por ZAREAGC (ver cache.mapa_area_comercial) -- nunca mergear
+    # el maestro completo sin colapsar, fanoutea filas (hasta 31x).
+    mapa_area = cache.mapa_area_comercial(df_master)
+    df_ancho = df_ancho.merge(mapa_area, on="ZAREAGC", how="left")
+    if not df_ep.empty:
+        df_ep = df_ep.merge(mapa_area, on="ZAREAGC", how="left")
 
 df_categoria, es_demo_categoria, _ = cache.get_or_demo(cache.get_categoria_producto, demo_data.categoria_producto_demo)
 if not es_demo_categoria and "sku" in df_categoria.columns and "grupo_material_3" in df_categoria.columns:
@@ -41,9 +50,9 @@ if df_ancho_f.empty:
 # cache.melt_historico_y_forecast).
 df_f = cache.melt_historico_y_forecast(df_ancho_f, tipos_forecast=("ZFCSTESTIMADO",))
 
-division_actual = filtros.get("ZBIGDIVISION", [None])[0]
-if division_actual:
-    st.caption(f"Gran División: {division_actual}")
+nivel_actual = nivel_producto_mas_desagregado(filtros)
+if nivel_actual:
+    st.caption(nivel_actual)
 
 serie = df_f.groupby(["Date", "Tipo"], as_index=False)["Valor"].sum()
 # area_superpuesta (no area_chart_por_tipo/apilada): Historico Ajustado y

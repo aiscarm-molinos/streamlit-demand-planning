@@ -10,7 +10,7 @@ import streamlit as st
 
 from src import cache, charts
 from src.data import demo_data
-from src.filters import render_sidebar_filters, apply_filters
+from src.filters import render_sidebar_filters, apply_filters, nivel_producto_mas_desagregado
 from src.utils.listas_periodos import periodos_futuros_mes
 
 TIPOS_DEFAULT = ["Historico Ajustado", "01 - Forecast Estadístico", "12 - Estimado Consensuado"]
@@ -22,6 +22,15 @@ if es_demo:
     st.warning(f"Mostrando datos de EJEMPLO (no hay conexión real a SAP IBP{f': {error}' if error else ''}). Es solo para previsualizar el diseño.", icon="🧪")
 
 df_ep, es_demo_ep, _ = cache.get_or_demo(cache.get_entregado_pendiente, demo_data.entregado_pendiente_demo)
+
+df_master, es_demo_master, _ = cache.get_or_demo(cache.get_customer_master, demo_data.customer_master_demo)
+if not es_demo_master and "ZAREAGC" in df_master.columns and "ZAREACOMERCIAL" in df_master.columns:
+    # Una fila por ZAREAGC (ver cache.mapa_area_comercial) -- nunca mergear
+    # el maestro completo sin colapsar, fanoutea filas (hasta 31x).
+    mapa_area = cache.mapa_area_comercial(df_master)
+    df_ancho = df_ancho.merge(mapa_area, on="ZAREAGC", how="left")
+    if not df_ep.empty:
+        df_ep = df_ep.merge(mapa_area, on="ZAREAGC", how="left")
 
 df_categoria, es_demo_categoria, _ = cache.get_or_demo(cache.get_categoria_producto, demo_data.categoria_producto_demo)
 if not es_demo_categoria and "sku" in df_categoria.columns and "grupo_material_3" in df_categoria.columns:
@@ -46,9 +55,9 @@ if df_f.empty:
     st.warning("No hay datos para los filtros seleccionados.")
     st.stop()
 
-division_actual = filtros.get("ZBIGDIVISION", [None])[0]
-if division_actual:
-    st.caption(f"Gran División: {division_actual}")
+nivel_actual = nivel_producto_mas_desagregado(filtros)
+if nivel_actual:
+    st.caption(nivel_actual)
 
 serie = df_f.groupby(["Date", "Tipo"], as_index=False)["Valor"].sum()
 st.plotly_chart(charts.line_chart(serie, "Date", "Valor", "Tipo", title="Suma de Valor"), width="stretch")
