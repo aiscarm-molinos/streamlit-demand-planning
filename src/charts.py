@@ -21,8 +21,13 @@ NEUTRO = "#898781"      # tinta muted
 
 
 def _base_layout(fig: go.Figure, title: str = None) -> go.Figure:
+    """``title=None`` NO debe pasarse a ``update_layout(title=...)`` --
+    Plotly no lo trata como "sin título" sino que renderiza literalmente el
+    texto "undefined" (visto por primera vez en pages/10_Curvas_Backtesting.py,
+    la primera página que llama a un chart sin título; el resto de las
+    páginas siempre pasaba un título explícito, por eso no había aparecido
+    antes)."""
     fig.update_layout(
-        title=title,
         colorway=CATEGORICAL,
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
@@ -30,6 +35,8 @@ def _base_layout(fig: go.Figure, title: str = None) -> go.Figure:
         margin=dict(l=10, r=10, t=40 if title else 10, b=10),
         hovermode="x unified",
     )
+    if title:
+        fig.update_layout(title=title)
     fig.update_xaxes(showgrid=False)
     fig.update_yaxes(showgrid=True, gridcolor="rgba(137,135,129,0.25)", zeroline=False)
     return fig

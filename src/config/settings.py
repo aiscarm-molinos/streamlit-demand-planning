@@ -14,6 +14,11 @@ proyecto (ver .env.example):
   no hay un perfil SSO configurado localmente (``aws configure sso``). Si
   están presentes, ``aws_ejecutar_query.py`` las usa en vez de
   ``AWS_PROFILE``.
+- ``s3_sagemaker.env``: configuración de AWS S3 para "Experimentos
+  SageMaker" (AWS_PROFILE_SAGEMAKER/AWS_REGION_SAGEMAKER o credenciales
+  explícitas *_SAGEMAKER, AWS_S3_SAGEMAKER_BUCKET, AWS_S3_SAGEMAKER_PREFIX).
+  Cuenta y rol DISTINTOS de los de Athena (cuenta "AI_Platform_DEV", rol
+  "MRP_Analistas_IBP_AWS") -- por eso no reutiliza aws_profile_name.
 
 Mismo patrón que ``ibp-forecast-mensual/src/config/settings.py``. Ninguno
 de los dos .env se commitea (ver .gitignore).
@@ -72,6 +77,24 @@ aws_access_key_id = os.getenv("AWS_ACCESS_KEY_ID")
 aws_secret_access_key = os.getenv("AWS_SECRET_ACCESS_KEY")
 aws_session_token = os.getenv("AWS_SESSION_TOKEN")
 
+# -------------------------------
+# AWS S3 SETTINGS (Experimentos SageMaker)
+# -------------------------------
+# Cuenta/rol distintos a los de Athena arriba (cuenta "AI_Platform_DEV", rol
+# "MRP_Analistas_IBP_AWS") -- por eso viven en su propio .env con su propio
+# perfil/credenciales, en vez de reutilizar aws_profile_name.
+s3_sagemaker_env_path = os.path.join(root_path, "s3_sagemaker.env")
+load_dotenv(dotenv_path=s3_sagemaker_env_path)
+
+aws_profile_name_sagemaker = os.getenv("AWS_PROFILE_SAGEMAKER")
+aws_region_name_sagemaker = os.getenv("AWS_REGION_SAGEMAKER")
+s3_sagemaker_bucket = os.getenv("AWS_S3_SAGEMAKER_BUCKET")
+s3_sagemaker_prefix = (os.getenv("AWS_S3_SAGEMAKER_PREFIX") or "").strip("/")
+
+aws_access_key_id_sagemaker = os.getenv("AWS_ACCESS_KEY_ID_SAGEMAKER")
+aws_secret_access_key_sagemaker = os.getenv("AWS_SECRET_ACCESS_KEY_SAGEMAKER")
+aws_session_token_sagemaker = os.getenv("AWS_SESSION_TOKEN_SAGEMAKER")
+
 
 def ibp_configurado() -> bool:
     return bool(ibp_base_url and ibp_resource and ibp_username and ibp_password)
@@ -79,3 +102,7 @@ def ibp_configurado() -> bool:
 
 def athena_configurado() -> bool:
     return bool(aws_database and aws_output_location)
+
+
+def s3_sagemaker_configurado() -> bool:
+    return bool(s3_sagemaker_bucket)
