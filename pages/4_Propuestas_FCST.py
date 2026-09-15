@@ -6,6 +6,7 @@ Estimado", que solo muestra 2), con selector de Tipo -- preseleccionado en
 Consensuado" (a pedido del usuario; antes venían las 8 categorías elegidas
 por default, saturando el gráfico)."""
 
+import pandas as pd
 import streamlit as st
 
 from src import cache, charts
@@ -21,23 +22,17 @@ df_ancho, es_demo, error = cache.get_or_demo(cache.get_historico_y_forecast_anch
 if es_demo:
     st.warning(f"Mostrando datos de EJEMPLO (no hay conexión real a SAP IBP{f': {error}' if error else ''}). Es solo para previsualizar el diseño.", icon="🧪")
 
-df_ep, es_demo_ep, _ = cache.get_or_demo(cache.get_entregado_pendiente, demo_data.entregado_pendiente_demo)
-
 df_master, es_demo_master, _ = cache.get_or_demo(cache.get_customer_master, demo_data.customer_master_demo)
 if not es_demo_master and "ZAREAGC" in df_master.columns and "ZAREACOMERCIAL" in df_master.columns:
     # Una fila por ZAREAGC (ver cache.mapa_area_comercial) -- nunca mergear
     # el maestro completo sin colapsar, fanoutea filas (hasta 31x).
     mapa_area = cache.mapa_area_comercial(df_master)
     df_ancho = df_ancho.merge(mapa_area, on="ZAREAGC", how="left")
-    if not df_ep.empty:
-        df_ep = df_ep.merge(mapa_area, on="ZAREAGC", how="left")
 
 df_categoria, es_demo_categoria, _ = cache.get_or_demo(cache.get_categoria_producto, demo_data.categoria_producto_demo)
 if not es_demo_categoria and "sku" in df_categoria.columns and "grupo_material_3" in df_categoria.columns:
     mapa_categoria = df_categoria[["sku", "grupo_material_3"]].drop_duplicates().rename(columns={"sku": "PRDID", "grupo_material_3": "Categoria"})
     df_ancho = df_ancho.merge(mapa_categoria, on="PRDID", how="left")
-    if not df_ep.empty:
-        df_ep = df_ep.merge(mapa_categoria, on="PRDID", how="left")
 
 filtros = render_sidebar_filters(df_ancho, key_prefix="prop")
 df_ancho_f = apply_filters(df_ancho, filtros)
@@ -65,18 +60,23 @@ st.plotly_chart(charts.line_chart(serie, "Date", "Valor", "Tipo", title="Suma de
 st.divider()
 
 mes_actual = periodos_futuros_mes(1)[0]
-mes_actual_ep = df_ep["PERIODID3"].min() if not df_ep.empty else None
 
-c1, c2 = st.columns(2)
-with c1:
-    # ZFCSTESTIMADO (mismo key figure que "12 - Estimado Consensuado" del
-    # gráfico de arriba) -- antes usaba ZFCSTCOMERCIALESTIMADO
-    # (`get_estimado_comercial`), un key figure distinto ("Ajuste Comercial"),
-    # por eso el número no coincidía con lo que mostraba el gráfico (mismo
-    # fix que en "2_Forecast.py").
-    actual = df_ancho_f.loc[df_ancho_f["PERIODID3"] == mes_actual, "ZFCSTESTIMADO"].sum()
-    charts.kpi_card("Forecast/Estimado Actual" + (" 🧪" if es_demo else ""), f"{actual:,.0f}")
-with c2:
-    df_ep_f = apply_filters(df_ep, filtros) if not df_ep.empty else df_ep
-    entregado_pendiente = df_ep_f.loc[df_ep_f["PERIODID3"] == mes_actual_ep, "ZENTREGAPENDIENTEMTH"].sum() if not df_ep_f.empty else 0
-    charts.kpi_card("Entregado + Pendiente" + (" 🧪" if es_demo_ep else ""), f"{entregado_pendiente:,.0f}")
+# "Ajuste Consensuado vs. Estadístico" -- cuánto se aparta (en %) el proceso
+# de planificación del modelo estadístico crudo, para el mes en curso. Antes
+# esta página repetía los 2 KPIs de "Forecast" (Forecast/Estimado Actual,
+# Entregado+Pendiente) sin aportar nada propio -- este es el número que el
+# waterfall de "Propuestas" está pensado para responder: ambas columnas
+# (ZFCSTESTIMADO, STATISTICALFORECASTQTY) ya están en df_ancho_f, no hace
+# falta una fuente de datos nueva.
+fila_mes_actual = df_ancho_f[df_ancho_f["PERIODID3"] == mes_actual]
+estadistico_actual = fila_mes_actual["STATISTICALFORECASTQTY"].sum()
+estimado_actual = fila_mes_actual["ZFCSTESTIMADO"].sum()
+ajuste_pct = (estimado_actual / estadistico_actual - 1) if estadistico_actual else float("nan")
+
+st.metric(
+    "Ajuste Consensuado vs. Estadístico" + (" 🧪" if es_demo else ""),
+    f"{estimado_actual:,.0f}",
+    delta=f"{ajuste_pct:+.1%} vs. Estadístico" if pd.notna(ajuste_pct) else None,
+    help="12 - Estimado Consensuado vs. 01 - Forecast Estadístico, mes en curso. Mide cuánto se aparta el proceso de planificación del modelo estadístico crudo.",
+)
+st.caption(f"01 - Forecast Estadístico: {estadistico_actual:,.0f}")

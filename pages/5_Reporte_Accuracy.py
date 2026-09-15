@@ -29,7 +29,7 @@ Forecast Accuracy.docx" pasados por el usuario):
 import streamlit as st
 import pandas as pd
 
-from src import cache, charts, filters
+from src import alertas, cache, charts, filters
 from src.data import demo_data
 from src.accuracy import (
     acc_bias_consensuado,
@@ -75,6 +75,22 @@ if df_meses.empty:
     st.warning("No hay datos para los meses elegidos.")
     st.stop()
 
+# --- Resumen general (todas las divisiones filtradas, agregado en un único
+# número) -- antes había que leer la tabla pivot completa para sacar el
+# número que probablemente se pregunte primero. groupby([]) no anda en
+# pandas ("No group keys passed!"), por eso la columna dummy "_Total".
+resumen_total = acc_bias_consensuado(df_meses.assign(_Total="Total"), ["_Total"]).iloc[0]
+texto_bias, color_bias_badge = alertas.etiqueta_bias(resumen_total["Bias"])
+c1, c2, c3 = st.columns(3)
+with c1:
+    charts.kpi_card("Accuracy Consensuado (general)", f"{resumen_total['Accuracy']:.1%}")
+with c2:
+    charts.kpi_card("Bias Consensuado (general)", f"{resumen_total['Bias']:+.1%}")
+with c3:
+    st.markdown(f"<div style='padding-top:1.9rem'><span style='color:{color_bias_badge}; font-weight:600'>{texto_bias}</span></div>", unsafe_allow_html=True)
+
+st.divider()
+
 col1, col2 = st.columns(2)
 
 with col1:
@@ -88,7 +104,10 @@ with col1:
     ], ignore_index=True)
     pivot_evolucion = pd.pivot_table(largo, index=["ZBIGDIVISION", "Métrica"], columns="PERIODID3", values="Valor")
     pivot_evolucion = pivot_evolucion[[m for m in meses_analisis if m in pivot_evolucion.columns]]
-    st.dataframe(pivot_evolucion.style.format("{:.2%}"), width="stretch")
+    st.dataframe(
+        pivot_evolucion.style.format("{:.2%}").apply(alertas.estilo_pivot_metricas, axis=1),
+        width="stretch",
+    )
 
 with col2:
     st.subheader("Accuracy & Bias Ponderado (meses seleccionados)")
@@ -100,7 +119,24 @@ with col2:
         acc_est_tot[["ZBIGDIVISION", "Accuracy"]].assign(Métrica="Accuracy Estadístico").rename(columns={"Accuracy": "Valor"}),
     ], ignore_index=True)
     pivot_ponderado = pd.pivot_table(ponderado, index=["ZBIGDIVISION", "Métrica"], values="Valor")
-    st.dataframe(pivot_ponderado.style.format("{:.2%}"), width="stretch")
+    st.dataframe(
+        pivot_ponderado.style.format("{:.2%}").apply(alertas.estilo_pivot_metricas, axis=1),
+        width="stretch",
+    )
+
+st.divider()
+st.subheader("Top 10 SKU con peor Accuracy Consensuado")
+acc_sku = acc_bias_consensuado(df_meses, ["PRDID"])
+df_master_prod, _, _ = cache.get_or_demo(cache.get_product_master, demo_data.producto_master_demo)
+acc_sku = acc_sku.merge(df_master_prod[["PRDID", "PRDDESCR"]].drop_duplicates(), on="PRDID", how="left")
+top_peores = acc_sku.dropna(subset=["Accuracy"]).nsmallest(10, "Accuracy")[["PRDID", "PRDDESCR", "Accuracy", "Bias"]]
+top_peores = top_peores.rename(columns={"PRDDESCR": "Descripción"})
+st.dataframe(
+    top_peores.style.format({"Accuracy": "{:.1%}", "Bias": "{:+.1%}"}).pipe(alertas.aplicar_semaforo_accuracy, columnas=["Accuracy"]),
+    width="stretch",
+    hide_index=True,
+)
+charts.boton_descarga_csv(top_peores, "top_skus_peor_accuracy.csv", key="dl_top_peores")
 
 st.divider()
 st.subheader("Segmento")

@@ -53,8 +53,16 @@ def resumen_nivel_elegido(
     df_mejor_nivel: pd.DataFrame, df_modelos: pd.DataFrame, df_dataset: pd.DataFrame
 ) -> list[NivelElegido]:
     """Por cada entidad de ``mejor_nivel_planificacion_por_entidad.csv``,
-    resuelve sus valores en el nivel elegido y busca su Accuracy_AVG en
-    ``modelos_forecast_mensual.csv`` (promedio si hay más de un valor)."""
+    resuelve sus valores en el nivel elegido y busca su accuracy promedio en
+    ``modelos_forecast_mensual.csv`` (promedio si hay más de un valor).
+
+    El nombre exacto de la columna de accuracy en ``modelos_forecast_mensual.csv``
+    varió entre corridas reales (``Accuracy_AVG`` en una, ``Accuracy AVG
+    Ultimos Periodos`` en otra -- mismo pipeline, versiones distintas) -- se
+    resuelve por prefijo ("empieza con accuracy", case-insensitive) en vez de
+    un nombre fijo, para no romper con la próxima variante de nombre."""
+    col_accuracy = next((c for c in df_modelos.columns if c.lower().startswith("accuracy")), None)
+
     resultados = []
     for _, fila in df_mejor_nivel.iterrows():
         prdfamily = fila["PRDFAMILY"]
@@ -62,12 +70,12 @@ def resumen_nivel_elegido(
         valores = valores_de_nivel(df_dataset, prdfamily, nivel)
 
         accuracy = None
-        if valores:
+        if valores and col_accuracy:
             match = df_modelos[
                 (df_modelos["NIVEL_DE_PLANIFICACION"] == nivel) & (df_modelos["VALOR_NIVEL"].astype(str).isin(valores))
             ]
-            if not match.empty and match["Accuracy_AVG"].notna().any():
-                accuracy = float(match["Accuracy_AVG"].mean())
+            if not match.empty and match[col_accuracy].notna().any():
+                accuracy = float(match[col_accuracy].mean())
 
         resultados.append(
             NivelElegido(

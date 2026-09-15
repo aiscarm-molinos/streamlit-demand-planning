@@ -59,17 +59,42 @@ ventas_ytd = df_hist.loc[df_hist["Date"].dt.year == anio_actual, "Valor"].sum()
 
 serie_mensual = df_hist.groupby("Date", as_index=False)["Valor"].sum().sort_values("Date")
 serie_mensual["var_pct"] = serie_mensual["Valor"].pct_change()
-promedio_var_mensual = serie_mensual["var_pct"].mean()
 
 historico_promedio_mensual = serie_mensual["Valor"].mean()
+
+# YoY (mismo mes, año anterior) en vez de "Promedio % Variación Mensual" --
+# ese promedio de 24 variaciones mes a mes, sin ajuste estacional, es
+# ruidoso (mezcla estacionalidad real con variación real) y no dice mucho
+# sobre hacia dónde va el negocio. YoY del último mes cerrado sí compara
+# contra un punto de referencia comparable.
+ultimo_mes = serie_mensual["Date"].max() if not serie_mensual.empty else None
+yoy_pct = float("nan")
+if pd.notna(ultimo_mes):
+    valor_ultimo_mes = serie_mensual.loc[serie_mensual["Date"] == ultimo_mes, "Valor"].sum()
+    mismo_mes_anio_anterior = ultimo_mes - pd.DateOffset(years=1)
+    fila_anio_anterior = serie_mensual.loc[serie_mensual["Date"] == mismo_mes_anio_anterior, "Valor"]
+    if not fila_anio_anterior.empty and fila_anio_anterior.iloc[0]:
+        yoy_pct = valor_ultimo_mes / fila_anio_anterior.iloc[0] - 1
 
 c1, c2, c3 = st.columns(3)
 with c1:
     charts.kpi_card("Ventas YTD Actual", f"{ventas_ytd:,.0f}")
 with c2:
-    charts.kpi_card("Promedio % Variación Mensual", f"{promedio_var_mensual:.1%}" if pd.notna(promedio_var_mensual) else "—")
+    charts.kpi_card(
+        f"YoY ({ultimo_mes:%b %Y})" if pd.notna(ultimo_mes) else "YoY",
+        f"{yoy_pct:+.1%}" if pd.notna(yoy_pct) else "—",
+        help="Último mes cerrado vs. mismo mes del año anterior.",
+    )
 with c3:
     charts.kpi_card("Histórico Promedio Mensual", f"{historico_promedio_mensual:,.0f}")
+
+# Alerta de caída brusca mes a mes -- el bar chart de abajo puede esconder
+# una caída puntual entre 24 barras; esto la señala explícitamente.
+UMBRAL_CAIDA_BRUSCA = -0.15
+if not serie_mensual.empty:
+    ultima_var = serie_mensual["var_pct"].iloc[-1]
+    if pd.notna(ultima_var) and ultima_var <= UMBRAL_CAIDA_BRUSCA:
+        st.error(f"⚠️ Caída brusca en {ultimo_mes:%b %Y}: {ultima_var:+.1%} vs. el mes anterior.", icon="🔴")
 
 st.divider()
 
@@ -85,8 +110,13 @@ with col1:
         serie_combinada = serie_historico
     st.plotly_chart(charts.bar_chart(serie_combinada, "Date", "Volumen", color="Serie", title="Histórico de Ventas"), width="stretch")
 with col2:
-    mix_productos = df_hist.groupby("ZBIGBUSINESS", as_index=False)["Valor"].sum().nlargest(8, "Valor")
-    st.plotly_chart(charts.pie_chart(mix_productos, "ZBIGBUSINESS", "Valor", title="Mix Productos"), width="stretch")
+    # Barra horizontal en vez de torta: con hasta 8 porciones un pie se
+    # vuelve difícil de comparar a simple vista -- una barra ordenada sí.
+    mix_productos = df_hist.groupby("ZBIGBUSINESS", as_index=False)["Valor"].sum().nlargest(8, "Valor").sort_values("Valor", ascending=True)
+    st.plotly_chart(
+        charts.bar_chart(mix_productos, x="Valor", y="ZBIGBUSINESS", orientation="h", title="Mix Productos"),
+        width="stretch",
+    )
 
 col3, col4 = st.columns(2)
 with col3:

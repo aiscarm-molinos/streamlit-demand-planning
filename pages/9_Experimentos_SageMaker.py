@@ -29,6 +29,7 @@ import pandas as pd
 import streamlit as st
 from botocore.exceptions import ClientError, NoCredentialsError, ProfileNotFound
 
+from src import charts
 from src.config.dynamics_config import root_path
 from src.config.settings import s3_sagemaker_bucket, s3_sagemaker_configurado, s3_sagemaker_prefix
 from src.data import aws_s3_experimentos as s3exp
@@ -78,6 +79,20 @@ def _tabla_objetos(archivos: list[s3exp.ObjetoS3]) -> None:
         width="stretch",
         hide_index=True,
     )
+
+
+def _accuracy_promedio_de_tar(tar) -> float | None:
+    """Promedio de Accuracy_% de reports/accuracy_forecast_mensual.csv, o
+    None si el .tar no lo tiene -- usado para "Comparar accuracy entre
+    corridas"."""
+    contenido = tarexp.listar_contenido(tar)
+    miembro = next((m for m in contenido.reports if m.nombre.endswith("accuracy_forecast_mensual.csv")), None)
+    if miembro is None:
+        return None
+    df = tarexp.leer_tabla(tar, miembro)
+    if "Accuracy_%" not in df.columns or df.empty:
+        return None
+    return df["Accuracy_%"].mean() / 100
 
 
 def _explorar_model_tar(tar) -> None:
@@ -185,10 +200,59 @@ if fuente == "S3 (en vivo)":
         if not entrenamientos:
             st.info(f"`{usuario}/models/` no tiene entrenamientos todavía.")
             st.stop()
+
+        # Antigüedad del último entrenamiento -- no requiere descarga, solo
+        # el LastModified que ya trae el listado (s3:ListBucket alcanza).
+        UMBRAL_DIAS_ANTIGUO = 30
+        ultimo_entrenamiento = entrenamientos[-1]  # orden lexicográfico == cronológico (timestamp zero-padded en el nombre)
+        _, archivos_ultimo = s3exp.listar_contenido(f"{usuario}/models/{ultimo_entrenamiento}/output")
+        obj_tar_ultimo = next((o for o in archivos_ultimo if o.nombre.startswith("model.tar")), None)
+        if obj_tar_ultimo:
+            fecha_ultimo = pd.Timestamp(obj_tar_ultimo.last_modified)
+            dias_desde_ultimo = (pd.Timestamp.now(tz=fecha_ultimo.tz) - fecha_ultimo).days
+            if dias_desde_ultimo > UMBRAL_DIAS_ANTIGUO:
+                st.warning(
+                    f"⚠️ Último entrenamiento de `{usuario}` hace {dias_desde_ultimo} días ({ultimo_entrenamiento}) "
+                    "-- puede que el pipeline haya dejado de correr.",
+                    icon="🕒",
+                )
+            else:
+                st.caption(f"Último entrenamiento hace {dias_desde_ultimo} día(s) ({ultimo_entrenamiento}).")
+
         entrenamiento = st.selectbox("Entrenamiento", entrenamientos)
         _, archivos_output = s3exp.listar_contenido(f"{usuario}/models/{entrenamiento}/output")
         st.subheader(f"`{usuario}/models/{entrenamiento}/output/`")
         _tabla_objetos(archivos_output)
+
+        with st.expander(f"📊 Comparar accuracy entre las {len(entrenamientos)} corridas de {usuario}"):
+            if len(entrenamientos) < 2:
+                st.caption("Este usuario solo tiene 1 entrenamiento -- no hay nada que comparar todavía.")
+            elif st.button("Comparar (descarga cada model.tar)", key="comparar_corridas_s3"):
+                filas = []
+                for ent in entrenamientos:
+                    _, archivos_ent = s3exp.listar_contenido(f"{usuario}/models/{ent}/output")
+                    obj_tar_ent = next((o for o in archivos_ent if o.nombre.startswith("model.tar")), None)
+                    if obj_tar_ent is None:
+                        continue
+                    try:
+                        data_ent = s3exp.descargar_objeto(obj_tar_ent.key)
+                    except ClientError as e:
+                        st.error(
+                            "No se pudo descargar `model.tar` -- el rol `MRP_Analistas_IBP_AWS` no tiene permiso "
+                            "de descarga (`s3:GetObject`) todavía, así que comparar corridas en vivo no funciona "
+                            "hasta que se sume ese permiso. Mientras tanto, probá en modo local con más de un "
+                            f"archivo en `sample_data/sagemaker/`.\n\n`{e}`"
+                        )
+                        filas = []
+                        break
+                    acc_ent = _accuracy_promedio_de_tar(tarexp.abrir_tar(data_ent))
+                    if acc_ent is not None:
+                        filas.append({"Entrenamiento": ent, "Accuracy promedio": acc_ent})
+                if filas:
+                    st.plotly_chart(
+                        charts.bar_chart(pd.DataFrame(filas), x="Entrenamiento", y="Accuracy promedio", title=f"Accuracy promedio por corrida -- {usuario}"),
+                        width="stretch",
+                    )
 
         objeto_tar = next((o for o in archivos_output if o.nombre.startswith("model.tar")), None)
         if objeto_tar and st.button(f"⬇️ Descargar y explorar {objeto_tar.nombre}"):
@@ -215,3 +279,20 @@ else:  # Archivo local de ejemplo
     ruta = os.path.join(SAMPLE_DIR, elegido)
     estado.fijar_activo_desde_path(ruta, elegido, origen="local")
     _explorar_model_tar(tarexp.abrir_tar(ruta))
+
+    with st.expander(f"📊 Comparar accuracy entre los {len(archivos_sample)} archivos locales"):
+        if len(archivos_sample) < 2:
+            st.caption("Agregá más de un `.tar` en `sample_data/sagemaker/` para poder comparar corridas.")
+        else:
+            filas_local = []
+            for p in archivos_sample:
+                acc_local = _accuracy_promedio_de_tar(tarexp.abrir_tar(p))
+                if acc_local is not None:
+                    filas_local.append({"Archivo": os.path.basename(p), "Accuracy promedio": acc_local})
+            if filas_local:
+                st.plotly_chart(
+                    charts.bar_chart(pd.DataFrame(filas_local), x="Archivo", y="Accuracy promedio", title="Accuracy promedio por archivo local"),
+                    width="stretch",
+                )
+            else:
+                st.caption("Ninguno de los archivos locales tiene reports/accuracy_forecast_mensual.csv.")

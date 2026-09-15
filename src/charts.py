@@ -19,6 +19,14 @@ POSITIVO = "#2a78d6"   # slot 1 (blue) del par divergente
 NEGATIVO = "#e34948"   # slot 8 (red) del par divergente
 NEUTRO = "#898781"      # tinta muted
 
+# Semáforo de 3 niveles (accuracy, KPIs con umbral) -- mismos cortes que
+# src/accuracy.py::SEGMENTOS_INFO (80%/60%), no reinventar otros acá.
+# Reusan slots ya existentes de CATEGORICAL/NEGATIVO en vez de sumar tonos
+# nuevos a la paleta.
+BUENO = "#1baf7a"   # slot 3 (verde)
+MEDIO = "#eda100"   # slot 4 (amber)
+MALO = NEGATIVO     # slot 8 (rojo)
+
 
 def _base_layout(fig: go.Figure, title: str = None) -> go.Figure:
     """``title=None`` NO debe pasarse a ``update_layout(title=...)`` --
@@ -46,13 +54,26 @@ def kpi_card(label: str, value, delta=None, help: str = None):
     st.metric(label, value, delta=delta, help=help)
 
 
+def boton_descarga_csv(df: pd.DataFrame, nombre_archivo: str, label: str = "⬇️ Descargar CSV", key: str = None) -> None:
+    """``st.download_button`` con CSV en memoria -- ninguna tabla de la app
+    tenía forma de salir de la app hasta ahora (ver CLAUDE.md, Transversal)."""
+    st.download_button(
+        label,
+        data=df.to_csv(index=False).encode("utf-8"),
+        file_name=nombre_archivo,
+        mime="text/csv",
+        key=key,
+    )
+
+
 def area_chart_por_tipo(df: pd.DataFrame, x: str, y: str, color: str, title: str = None) -> go.Figure:
     """Area chart apilado por categoría (ej. Tipo: Histórico/Forecast)."""
     fig = px.area(df, x=x, y=y, color=color)
     return _base_layout(fig, title)
 
 
-def _hex_a_rgba(hex_color: str, alpha: float) -> str:
+def hex_a_rgba(hex_color: str, alpha: float) -> str:
+    """Pública porque src/alertas.py también la usa para tintes de fondo en tablas."""
     h = hex_color.lstrip("#")
     r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
     return f"rgba({r},{g},{b},{alpha})"
@@ -73,7 +94,7 @@ def area_superpuesta(df: pd.DataFrame, x: str, y: str, color: str, title: str = 
         fig.add_trace(go.Scatter(
             x=sub[x], y=sub[y], name=str(categoria), mode="lines",
             line=dict(color=c, width=2),
-            fill="tozeroy", fillcolor=_hex_a_rgba(c, 0.25),
+            fill="tozeroy", fillcolor=hex_a_rgba(c, 0.25),
         ))
     return _base_layout(fig, title)
 
@@ -105,7 +126,7 @@ def bias_bar_chart(df: pd.DataFrame, x: str, y: str, title: str = None) -> go.Fi
     return _base_layout(fig, title)
 
 
-def ranking_semaforo(df: pd.DataFrame, y: str, x: str, title: str = None) -> go.Figure:
+def ranking_semaforo(df: pd.DataFrame, y: str, x: str, title: str = None, hover_data: dict = None) -> go.Figure:
     """
     Bar chart horizontal ordenado descendente, coloreado en escala continua
     rojo-amarillo-verde según el valor -- réplica del "Accuracy por Cuentas"
@@ -139,7 +160,7 @@ def ranking_semaforo(df: pd.DataFrame, y: str, x: str, title: str = None) -> go.
     fig = px.bar(
         df, x=x, y=y, orientation="h",
         color=x, color_continuous_scale="RdYlGn", range_color=[0, 1],
-        text=etiquetas,
+        text=etiquetas, hover_data=hover_data,
     )
     fig.update_traces(textposition="inside", insidetextanchor="end", marker_line_width=0)
     fig.update_coloraxes(showscale=False)

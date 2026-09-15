@@ -5,3 +5,4 @@ __pycache__/
 *.pyc
 .streamlit/secrets.toml
 sample_data/
+reports/

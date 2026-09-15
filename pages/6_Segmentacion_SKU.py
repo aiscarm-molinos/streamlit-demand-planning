@@ -12,7 +12,7 @@ meses elegidos en "Meses a analizar" (sidebar, sección Período), igual que
 
 import streamlit as st
 
-from src import cache, filters
+from src import alertas, cache, charts, filters
 from src.data import demo_data
 from src.accuracy import SEGMENTOS_INFO, MESES_PROX_FCST, forecast_proximos_4m
 from src.utils.listas_periodos import periodos_empezando_en
@@ -94,13 +94,18 @@ tabla = tabla.rename(columns={
 
 st.divider()
 
-col1, col2 = st.columns(2)
+col1, col2, col3 = st.columns(3)
 with col1:
     segmentos_disponibles = ["Todas"] + sorted(tabla["Segmento SKU"].dropna().unique().tolist())
     segmento_elegido = st.selectbox("Segmento", segmentos_disponibles)
 with col2:
     skus_disponibles = ["Todas"] + sorted(tabla["SKU"].dropna().unique().tolist())
     sku_elegido = st.selectbox("SKU", skus_disponibles)
+with col3:
+    # "Impacto" = Margen Total SKU (USD) x |Desvío Accuracy (pp.)| -- prioriza
+    # SKU de alto margen Y mal accuracy por sobre solo alto volumen (Entrega),
+    # que no distingue si ese volumen ya está bien pronosticado.
+    orden_criterio = st.selectbox("Ordenar por", ["Entrega", "Impacto"])
 
 tabla_mostrar = tabla
 if segmento_elegido != "Todas":
@@ -108,12 +113,15 @@ if segmento_elegido != "Todas":
 if sku_elegido != "Todas":
     tabla_mostrar = tabla_mostrar[tabla_mostrar["SKU"] == sku_elegido]
 
+tabla_mostrar = tabla_mostrar.copy()
+tabla_mostrar["Impacto"] = tabla_mostrar["Margen Total SKU (USD)"] * tabla_mostrar["Desvío Accuracy (pp.)"].abs()
+
 columnas = [
     c for c in [
         "SKU", "Descripción SKU", "Entrega", "Margen Unitario (USD)", "% Mix Margen (SKU)",
         "FCST Estadístico", "FCST Consensuado",
         "Acc. FCST Estadístico Ponderado", "Acc. FCST Consensuado Ponderado",
-        "Desvío Accuracy (pp.)", "Segmento SKU",
+        "Desvío Accuracy (pp.)", "Impacto", "Segmento SKU",
     ] if c in tabla_mostrar.columns
 ]
 
@@ -123,17 +131,22 @@ columnas = [
 # el filtro trae miles de SKU.
 alto_tabla = min(38 + 35 * (len(tabla_mostrar) + 1), 1200)
 
+tabla_ordenada = tabla_mostrar.sort_values(orden_criterio, ascending=False)
+segmento_critico = [SEGMENTOS_INFO["3.2"]["segmento"]]
+
 st.dataframe(
-    tabla_mostrar[columnas].sort_values("Entrega", ascending=False).style.format(
+    tabla_ordenada[columnas].style.format(
         {
             "Entrega": "{:,.2f}", "Margen Unitario (USD)": "{:.2f}", "% Mix Margen (SKU)": "{:.2%}",
             "FCST Estadístico": "{:,.2f}", "FCST Consensuado": "{:,.2f}",
             "Acc. FCST Estadístico Ponderado": "{:.2%}", "Acc. FCST Consensuado Ponderado": "{:.2%}",
-            "Desvío Accuracy (pp.)": "{:.2f}",
+            "Desvío Accuracy (pp.)": "{:.2f}", "Impacto": "{:,.0f}",
         },
         na_rep="—",
-    ),
+    ).apply(lambda r: alertas.resaltar_fila_critica(r, "Segmento SKU", segmento_critico), axis=1),
     width="stretch",
     height=alto_tabla,
     hide_index=True,
 )
+st.caption(f"🔴 Fondo resaltado: Segmento {segmento_critico[0]} -- producto crítico que requiere revisión.")
+charts.boton_descarga_csv(tabla_ordenada[columnas], "segmentacion_sku.csv", key="dl_segmentacion")

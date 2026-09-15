@@ -4,6 +4,8 @@ Tablero de control del área de Demand Planning (Molinos). App Streamlit que rep
 
 No es una réplica visual pixel-perfect de los `.pbix` originales — es una réplica **funcional**: mismos filtros, mismos números, mismas fórmulas de negocio, con gráficos hechos en Plotly en vez de Power BI.
 
+Además de la réplica funcional, la app agrega una capa propia de **alertas accionables**: semáforo de 3 niveles (🟢🟡🔴, mismos cortes 80%/60% que la Segmentación de SKU real) en las tablas de accuracy, badges de Bias direccional (sobre/subestimación), filas críticas resaltadas, y KPIs derivados (run-rate de Plan Anual, YoY de Histórico, ajuste Consensuado vs. Estadístico) pensados para señalar qué mirar, no solo mostrar números — ver `src/alertas.py` y CLAUDE.md.
+
 > Para el detalle técnico completo (arquitectura de datos, fórmulas exactas, decisiones de diseño y su porqué, bugs ya corregidos) ver [`CLAUDE.md`](./CLAUDE.md) — pensado como referencia para quien vaya a tocar el código, humano o asistente de IA.
 
 ## Qué tableros replica

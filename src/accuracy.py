@@ -149,6 +149,19 @@ def _accuracy_ponderada(
     return g.drop(columns=["_abs_error"])
 
 
+def _bias(df: pd.DataFrame, group_cols: list, col_forecast: str) -> pd.DataFrame:
+    """Bias genérico -- cociente de sumas totales (no decompone por SKU ni
+    por mes, a diferencia de la Accuracy; ver ``_accuracy_ponderada``):
+    Σ Forecast / Σ Actual - 1. Mismo cálculo para Consensuado y Estadístico,
+    solo cambia qué columna de forecast se pasa -- ver ``acc_bias_consensuado``
+    y ``bias_estadistico``."""
+    bias = df.groupby(group_cols, as_index=False).agg(
+        Forecast=(col_forecast, "sum"), Actual=("Actual", "sum")
+    )
+    bias["Bias"] = bias["Forecast"] / bias["Actual"].replace(0, pd.NA) - 1
+    return bias[[*group_cols, "Bias"]]
+
+
 def acc_bias_consensuado(df: pd.DataFrame, group_cols: list) -> pd.DataFrame:
     """
     "Acc. FCST Consensuado (Ponderado por Mes)" + "Bias FCST Consensuado
@@ -163,17 +176,19 @@ def acc_bias_consensuado(df: pd.DataFrame, group_cols: list) -> pd.DataFrame:
     (bug corregido -- antes decomponía solo a nivel PERIODID3, sin PRDID, lo
     que subestimaba el error cuando un SKU sobre-forecasteaba y otro
     sub-forecasteaba dentro del mismo grupo).
-
-    El Bias, a diferencia de la Accuracy, es un cociente de sumas totales (no
-    decompone por SKU ni por mes, la fórmula ya es lineal:
-    Σ Forecast / Σ Actual - 1).
     """
     acc = _accuracy_ponderada(df, group_cols, ["PRDID", "PERIODID3"], "ForecastConsensuado", "Actual")
-    bias = df.groupby(group_cols, as_index=False).agg(
-        Forecast=("ForecastConsensuado", "sum"), Actual=("Actual", "sum")
-    )
-    bias["Bias"] = bias["Forecast"] / bias["Actual"].replace(0, pd.NA) - 1
-    return acc.merge(bias[[*group_cols, "Bias"]], on=group_cols)
+    bias = _bias(df, group_cols, "ForecastConsensuado")
+    return acc.merge(bias, on=group_cols)
+
+
+def bias_estadistico(df: pd.DataFrame, group_cols: list) -> pd.DataFrame:
+    """"Bias FCST Estadístico" -- mismo cálculo que el Bias de
+    ``acc_bias_consensuado`` pero sobre ``ForecastEstadistico``. No existía
+    como función propia hasta que el "Reporte de Resultados" mensual
+    (``src/reporte_mensual.py``) lo necesitó -- el .pbix real solo mostraba
+    Bias Consensuado, nunca Estadístico, por eso no estaba."""
+    return _bias(df, group_cols, "ForecastEstadistico")
 
 
 def acc_estadistico(df_producto: pd.DataFrame, group_cols: list) -> pd.DataFrame:

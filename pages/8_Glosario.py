@@ -25,3 +25,26 @@ df_segmentos = pd.DataFrame(
     ]
 )
 st.dataframe(df_segmentos, width="stretch", hide_index=True)
+
+st.subheader("Semáforo de Accuracy")
+st.caption(
+    "Cortes de color usados en las tablas y KPIs de Reporte Accuracy, Segmentación SKU, Ranking Clientes, "
+    "Plan Anual e Inicio (ver `src/alertas.py`) -- **no coinciden** con los de la Segmentación de SKU de arriba "
+    "(80%/60%), que son la fórmula DAX real y no se tocan."
+)
+df_semaforo = pd.DataFrame(
+    [
+        {"Color": "🟢 Bueno", "Rango": "Accuracy > 80%", "Lectura": "El forecast predice correctamente la demanda"},
+        {"Color": "🟡 Medio", "Rango": "70% ≤ Accuracy ≤ 80%", "Lectura": "Precisión aceptable, con margen de mejora"},
+        {"Color": "🔴 Malo", "Rango": "Accuracy < 70%", "Lectura": "Precisión baja, requiere revisión"},
+    ]
+)
+st.dataframe(df_semaforo, width="stretch", hide_index=True)
+
+st.caption(
+    "Bias (umbral ±5%, semáforo simétrico -- el color solo marca si el sesgo está dentro de rango, no la "
+    "dirección): "
+    "🟢 Sin sesgo relevante (entre -5% y +5%) · "
+    "🔴 Sobreestimación (Bias > +5%, riesgo de sobrestock) · "
+    "🔴 Subestimación (Bias < -5%, riesgo de quiebre)."
+)

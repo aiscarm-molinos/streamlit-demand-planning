@@ -11,7 +11,7 @@ import streamlit as st
 from src import cache, charts
 from src.data import demo_data
 from src.filters import render_sidebar_filters, apply_filters, nivel_producto_mas_desagregado
-from src.utils.listas_periodos import periodos_futuros_mes
+from src.utils.listas_periodos import periodos_futuros_mes, periodid3_a_fecha
 
 st.title("🔮 Forecast - Estimado")
 
@@ -63,11 +63,24 @@ serie = df_f.groupby(["Date", "Tipo"], as_index=False)["Valor"].sum()
 # contra el dominio combinado de ambas series). Con traces independientes
 # (una por Tipo, cada una con su propio fill a cero) la transición queda
 # limpia, igual que ya se ve en "Plan Anual vs Histórico + FCST".
-st.plotly_chart(charts.area_superpuesta(serie, "Date", "Valor", "Tipo", title="Valor por Tipo"), width="stretch")
+mes_actual = periodos_futuros_mes(1)[0]
+fig_serie = charts.area_superpuesta(serie, "Date", "Valor", "Tipo", title="Valor por Tipo")
+# Marca dónde termina lo cerrado y arranca el mes en curso -- sin esto hay
+# que leer el eje de fechas para ubicar "dónde estamos parados" en el área.
+# ``add_vline`` (con pd.Timestamp o con string) rompe acá con
+# "unsupported operand type(s) for +: 'int' and 'str'" -- bug conocido de
+# Plotly calculando la posición de la shape contra un eje de fechas en una
+# figura armada a mano (go.Figure, no px). ``add_shape`` con yref="paper" no
+# pasa por ese cálculo y funciona bien.
+_x_mes_actual = periodid3_a_fecha(mes_actual)
+fig_serie.add_shape(
+    type="line", x0=_x_mes_actual, x1=_x_mes_actual, y0=0, y1=1, yref="paper",
+    line=dict(dash="dot", color=charts.NEUTRO, width=1),
+)
+fig_serie.add_annotation(x=_x_mes_actual, y=1, yref="paper", text="Mes en curso", showarrow=False, yanchor="bottom")
+st.plotly_chart(fig_serie, width="stretch")
 
 st.divider()
-
-mes_actual = periodos_futuros_mes(1)[0]
 mes_actual_ep = df_ep["PERIODID3"].min() if not df_ep.empty else None
 
 c1, c2, c3 = st.columns(3)

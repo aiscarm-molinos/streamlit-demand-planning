@@ -16,12 +16,14 @@ tendría sentido acá -- en cambio, ``divisiones`` se restringe directo a esa
 lista fija (nunca una 4ta división como "MP, Semi y Subproductos").
 """
 
+import pandas as pd
 import streamlit as st
 
-from src import cache, charts, filters
+from src import alertas, cache, charts, filters
 from src.data import demo_data
 from src.accuracy import acc_bias_consensuado
 from src.filters import apply_filters
+from src.utils.listas_periodos import periodid3_a_fecha, periodos_terminando_en
 
 st.title("🏆 Ranking por Área Comercial / Área GC")
 
@@ -62,6 +64,15 @@ if not divisiones:
     st.warning("No hay Gran División para los filtros elegidos.")
     st.stop()
 
+# Ventana previa, mismo largo que "Meses a analizar", terminando justo antes
+# del primer mes elegido -- para detectar cuentas cuya accuracy CAYÓ, no solo
+# su nivel actual (ver alertas.py).
+mes_anterior_al_primero = (periodid3_a_fecha(meses_analisis[0]) - pd.DateOffset(months=1)).strftime("%y-%b")
+meses_previos = periodos_terminando_en(len(meses_analisis), mes_anterior_al_primero)
+df_prev = df_f[df_f["PERIODID3"].isin(meses_previos)]
+
+UMBRAL_CAIDA_PP = -10  # puntos porcentuales -- misma magnitud que el corte medio/malo de accuracy (20pp de ancho)
+
 st.subheader("Ranking por Área Comercial")
 cols_tabla = st.columns(len(divisiones))
 for col, division in zip(cols_tabla, divisiones):
@@ -69,9 +80,25 @@ for col, division in zip(cols_tabla, divisiones):
         st.caption(division)
         df_div = df_meses[df_meses["ZBIGDIVISION"] == division]
         if "ZAREACOMERCIAL" in df_div.columns:
-            acc_areacom = acc_bias_consensuado(df_div, ["ZAREACOMERCIAL"])[["ZAREACOMERCIAL", "Accuracy"]]
-            acc_areacom = acc_areacom.rename(columns={"Accuracy": "Accuracy FCST Consensuado"}).sort_values("Accuracy FCST Consensuado", ascending=False)
-            st.dataframe(acc_areacom.style.format({"Accuracy FCST Consensuado": "{:.2%}"}), width="stretch", hide_index=True)
+            acc_areacom = acc_bias_consensuado(df_div, ["ZAREACOMERCIAL"])[["ZAREACOMERCIAL", "Accuracy", "Bias"]]
+            acc_areacom = acc_areacom.rename(columns={"Accuracy": "Accuracy FCST Consensuado"})
+
+            df_div_prev = df_prev[df_prev["ZBIGDIVISION"] == division]
+            acc_prev = acc_bias_consensuado(df_div_prev, ["ZAREACOMERCIAL"])[["ZAREACOMERCIAL", "Accuracy"]].rename(columns={"Accuracy": "_AccuracyAnterior"})
+            acc_areacom = acc_areacom.merge(acc_prev, on="ZAREACOMERCIAL", how="left")
+            acc_areacom["Δ pp. vs. período anterior"] = (acc_areacom["Accuracy FCST Consensuado"] - acc_areacom["_AccuracyAnterior"]) * 100
+            acc_areacom = acc_areacom.drop(columns=["_AccuracyAnterior"]).sort_values("Accuracy FCST Consensuado", ascending=False)
+
+            st.dataframe(
+                acc_areacom.style.format(
+                    {"Accuracy FCST Consensuado": "{:.2%}", "Bias": "{:+.1%}", "Δ pp. vs. período anterior": "{:+.1f}"},
+                    na_rep="—",
+                )
+                .pipe(alertas.aplicar_semaforo_accuracy, columnas=["Accuracy FCST Consensuado"])
+                .map(lambda v: f"color: {charts.MALO}; font-weight: 600" if pd.notna(v) and v <= UMBRAL_CAIDA_PP else "", subset=["Δ pp. vs. período anterior"]),
+                width="stretch",
+                hide_index=True,
+            )
         else:
             st.caption("Sin Area Comercial disponible")
 
@@ -81,8 +108,8 @@ cols_chart = st.columns(len(divisiones))
 for col, division in zip(cols_chart, divisiones):
     with col:
         df_div = df_meses[df_meses["ZBIGDIVISION"] == division]
-        acc_areagc = acc_bias_consensuado(df_div, ["ZAREAGC"])[["ZAREAGC", "Accuracy"]]
+        acc_areagc = acc_bias_consensuado(df_div, ["ZAREAGC"])[["ZAREAGC", "Accuracy", "Bias"]]
         st.plotly_chart(
-            charts.ranking_semaforo(acc_areagc, "ZAREAGC", "Accuracy", title=f"{division} - Accuracy por Cuentas"),
+            charts.ranking_semaforo(acc_areagc, "ZAREAGC", "Accuracy", title=f"{division} - Accuracy por Cuentas", hover_data={"Bias": ":+.1%"}),
             width="stretch",
         )

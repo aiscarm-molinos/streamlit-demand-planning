@@ -86,9 +86,15 @@ def leer_tabla(tar: tarfile.TarFile, miembro: MiembroTar) -> pd.DataFrame:
     """``sep=None, engine="python"`` autodetecta el delimitador -- los reports
     reales de este .tar vienen con ";" (no "," como es más común), no asumir
     coma acá. ``decimal=","`` porque las columnas numéricas vienen en formato
-    ar/es ("1334,18") -- sin esto quedan como texto en vez de número."""
+    ar/es ("1334,18") -- sin esto quedan como texto en vez de número.
+    ``encoding="utf-8-sig"`` porque algunos reports vienen con BOM UTF-8
+    (``\\xef\\xbb\\xbf``) al principio del archivo -- sin esto, pandas deja
+    el BOM pegado al nombre de la primera columna (``"\\ufeffModelo"`` en vez
+    de ``"Modelo"``), y cualquier acceso por ese nombre revienta con
+    KeyError aunque la columna "esté". utf-8-sig no rompe archivos SIN BOM
+    (los lee igual que utf-8 puro), así que es seguro dejarlo siempre."""
     with tar.extractfile(miembro.nombre) as f:
-        return pd.read_csv(f, sep=None, engine="python", decimal=",")
+        return pd.read_csv(f, sep=None, engine="python", decimal=",", encoding="utf-8-sig")
 
 
 def leer_texto(tar: tarfile.TarFile, miembro: MiembroTar) -> str:
