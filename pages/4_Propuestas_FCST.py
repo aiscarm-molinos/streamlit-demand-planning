@@ -55,7 +55,9 @@ if nivel_actual:
     st.caption(nivel_actual)
 
 serie = df_f.groupby(["Date", "Tipo"], as_index=False)["Valor"].sum()
-st.plotly_chart(charts.line_chart(serie, "Date", "Valor", "Tipo", title="Suma de Valor"), width="stretch")
+# Sin título (a pedido del usuario, 2026-09-18): "Suma de Valor" era un
+# título genérico que no aportaba -- la leyenda ya identifica las series.
+st.plotly_chart(charts.line_chart(serie, "Date", "Valor", "Tipo"), width="stretch")
 
 st.divider()
 

@@ -90,41 +90,15 @@ total_plan = serie_plan["Valor"].sum()
 total_hf = serie_valor["Valor"].sum() if not df_hf_f.empty else 0.0
 gap_pct = (total_hf / total_plan - 1) if total_plan else float("nan")
 
-col_kpi1, col_kpi2 = st.columns(2)
-with col_kpi1:
-    st.metric(
-        "Histórico + FCST",
-        f"{total_hf:,.0f}",
-        delta=f"{gap_pct:.2%}" if pd.notna(gap_pct) else None,
-        help="Comparado contra el Objetivo (Plan Anual) del período/división filtrado. Incluye el Forecast Consensuado oficial para los meses futuros.",
-    )
-    st.caption(f"Objetivo (Plan Anual): {total_plan:,.0f}")
-    nivel_gap = alertas.nivel_brecha(gap_pct)
-    emoji_gap, color_gap = alertas.badge_nivel(nivel_gap)
-    st.markdown(f"<span style='color:{color_gap}; font-weight:600'>{emoji_gap} Brecha {nivel_gap}</span>", unsafe_allow_html=True)
-
-with col_kpi2:
-    # Proyección "run-rate": ritmo de los meses YA CERRADOS de anio_actual
-    # (Histórico Ajustado real, sin Forecast Consensuado) extrapolado a los 12
-    # meses del año -- una segunda mirada, independiente del forecast oficial
-    # que ya está adentro de "Histórico + FCST" de la izquierda.
-    meses_hist = periodos_historicos_mes(cache.MESES_HISTORICOS)
-    df_real_anio = df_ancho_f[
-        df_ancho_f["PERIODID3"].isin(meses_hist) & (df_ancho_f["Date"].dt.year == anio_actual)
-    ] if not df_ancho_f.empty else df_ancho_f
-    serie_real_anio = df_real_anio.groupby("Date", as_index=False)["ADJUSTEDACTUALSQTY"].sum() if not df_real_anio.empty else pd.DataFrame()
-    meses_cerrados = len(serie_real_anio)
-    promedio_mensual_real = serie_real_anio["ADJUSTEDACTUALSQTY"].mean() if meses_cerrados else float("nan")
-    proyeccion_run_rate = promedio_mensual_real * 12 if pd.notna(promedio_mensual_real) else float("nan")
-    total_plan_anio = df_plan_f.loc[df_plan_f["Date"].dt.year == anio_actual, "PLANANUAL"].sum() if not df_plan_f.empty else 0.0
-    gap_run_rate = (proyeccion_run_rate / total_plan_anio - 1) if total_plan_anio and pd.notna(proyeccion_run_rate) else float("nan")
-
-    st.metric(
-        f"Proyección run-rate {anio_actual}",
-        f"{proyeccion_run_rate:,.0f}" if pd.notna(proyeccion_run_rate) else "—",
-        delta=f"{gap_run_rate:.2%}" if pd.notna(gap_run_rate) else None,
-        help=f"Promedio mensual de los {meses_cerrados} meses ya cerrados de {anio_actual} (solo Histórico Ajustado real, sin Forecast Consensuado) × 12, vs. Plan Anual {anio_actual}.",
-    )
-    st.caption(f"Basado en {meses_cerrados} mes(es) cerrado(s) de {anio_actual}" if meses_cerrados else "Sin meses cerrados de este año todavía")
+st.metric(
+    "Histórico + FCST",
+    f"{total_hf:,.0f}",
+    delta=f"{gap_pct:.2%}" if pd.notna(gap_pct) else None,
+    help="Comparado contra el Objetivo (Plan Anual) del período/división filtrado. Incluye el Forecast Consensuado oficial para los meses futuros.",
+)
+st.caption(f"Objetivo (Plan Anual): {total_plan:,.0f}")
+nivel_gap = alertas.nivel_brecha(gap_pct)
+emoji_gap, color_gap = alertas.badge_nivel(nivel_gap)
+st.markdown(f"<span style='color:{color_gap}; font-weight:600'>{emoji_gap} Brecha {nivel_gap}</span>", unsafe_allow_html=True)
 
 st.plotly_chart(charts.area_superpuesta(serie, "Date", "Valor", "Serie", title="Plan Anual vs Histórico + FCST"), width="stretch")

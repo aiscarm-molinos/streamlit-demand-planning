@@ -20,6 +20,8 @@ from src.utils.listas_periodos import periodos_historicos_mes, periodos_futuros_
 
 st.title("📈 Histórico de ventas")
 
+MESES_ABREV_ES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+
 # Formato ANCHO (ver cache.get_historico_y_forecast_ancho): se filtra PRIMERO
 # y recién ahí se toma la columna Histórico Ajustado -- no hace falta
 # "explotar" a Tipo/Valor para esta página, que solo usa esa única serie.
@@ -62,11 +64,12 @@ serie_mensual["var_pct"] = serie_mensual["Valor"].pct_change()
 
 historico_promedio_mensual = serie_mensual["Valor"].mean()
 
-# YoY (mismo mes, año anterior) en vez de "Promedio % Variación Mensual" --
-# ese promedio de 24 variaciones mes a mes, sin ajuste estacional, es
-# ruidoso (mezcla estacionalidad real con variación real) y no dice mucho
-# sobre hacia dónde va el negocio. YoY del último mes cerrado sí compara
-# contra un punto de referencia comparable.
+# MMAA (Mismo Mes, Año Anterior -- antes rotulado "YoY", a pedido del
+# usuario, 2026-09-18) en vez de "Promedio % Variación Mensual" -- ese
+# promedio de 24 variaciones mes a mes, sin ajuste estacional, es ruidoso
+# (mezcla estacionalidad real con variación real) y no dice mucho sobre
+# hacia dónde va el negocio. MMAA del último mes cerrado sí compara contra
+# un punto de referencia comparable.
 ultimo_mes = serie_mensual["Date"].max() if not serie_mensual.empty else None
 yoy_pct = float("nan")
 if pd.notna(ultimo_mes):
@@ -81,9 +84,9 @@ with c1:
     charts.kpi_card("Ventas YTD Actual", f"{ventas_ytd:,.0f}")
 with c2:
     charts.kpi_card(
-        f"YoY ({ultimo_mes:%b %Y})" if pd.notna(ultimo_mes) else "YoY",
+        f"MMAA ({MESES_ABREV_ES[ultimo_mes.month - 1]} {ultimo_mes.year})" if pd.notna(ultimo_mes) else "MMAA",
         f"{yoy_pct:+.1%}" if pd.notna(yoy_pct) else "—",
-        help="Último mes cerrado vs. mismo mes del año anterior.",
+        help="Mismo Mes, Año Anterior: último mes cerrado vs. ese mismo mes del año anterior.",
     )
 with c3:
     charts.kpi_card("Histórico Promedio Mensual", f"{historico_promedio_mensual:,.0f}")

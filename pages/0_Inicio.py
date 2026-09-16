@@ -17,11 +17,11 @@ from src import alertas, cache, charts, filters
 from src import generador_reporte_docx as gendoc
 from src import reporte_mensual as rm
 from src import reporte_mensual_narrativa as narr
-from src.accuracy import acc_bias_consensuado, acc_estadistico
+from src.accuracy import acc_bias_consensuado, acc_estadistico, bias_estadistico, MESES_PROX_FCST, forecast_proximos_4m
 from src.config.settings import ibp_configurado, athena_configurado
 from src.data import demo_data
 from src.preload import FUENTES
-from src.utils.listas_periodos import periodid3_a_fecha, periodos_historicos_mes, periodos_futuros_mes, periodos_terminando_en
+from src.utils.listas_periodos import periodid3_a_fecha, periodos_futuros_mes, periodos_terminando_en, periodos_empezando_en
 
 st.title("Forecast Demanda IBP")
 st.caption("Réplica funcional de los tableros Power BI: Forecast IBP y Forecast Accuracy IBP")
@@ -69,14 +69,10 @@ else:
     # Todo esto reusa el cache ya tibio de FUENTES de arriba -- no dispara
     # ninguna consulta nueva a SAP/Athena, solo agrega sobre lo ya cargado.
     df_producto, _, _ = cache.get_or_demo(cache.get_forecast_vs_actual_producto, demo_data.forecast_vs_actual_producto_demo)
-    df_ancho, _, _ = cache.get_or_demo(cache.get_historico_y_forecast_ancho, demo_data.historico_y_forecast_ancho_demo)
-    df_plan, _, _ = cache.get_or_demo(cache.get_plan_anual, demo_data.plan_anual_demo)
-
-    anio_actual = pd.Timestamp.today().year
 
     # Último mes CERRADO (con venta real, excluye el mes en curso) -- a
-    # pedido del usuario, Accuracy/Segmento del resumen ejecutivo van a un
-    # único mes puntual (no una ventana de varios meses como el default de
+    # pedido del usuario, Accuracy/Bias/Segmento del resumen ejecutivo van a
+    # un único mes puntual (no una ventana de varios meses como el default de
     # "Meses a analizar" del sidebar de Accuracy), igual que el "Reporte de
     # Resultados" mensual real ("En agosto, Alimentos terminó con..." -- un
     # solo mes, no un rolling window).
@@ -90,16 +86,11 @@ else:
         elif meses_con_venta:
             mes_ultimo_cerrado = meses_con_venta[-1]
 
-    st.caption(
-        f"Accuracy y SKU en Segmento crítico: **{mes_ultimo_cerrado or '—'}** (último mes cerrado) · "
-        f"Ventas vs. Plan Anual: acumulado **{anio_actual}** (YTD)"
-    )
-
-    meses_hist = periodos_historicos_mes(cache.MESES_HISTORICOS)
+    st.caption(f"Accuracy, Bias y SKU en Segmento crítico: **{mes_ultimo_cerrado or '—'}** (último mes cerrado)")
 
     def _resumen_division(division: str) -> dict:
         fila = {"Gran División": division, "Accuracy Estadístico": float("nan"), "Accuracy Consensuado": float("nan"),
-                "Ventas vs. Plan Anual YTD": float("nan"), "SKU en Segmento crítico (3.2)": 0}
+                "Bias Estadístico": float("nan"), "Bias Consensuado": float("nan"), "SKU en Segmento crítico (3.2)": 0}
 
         if not df_producto.empty and "ZBIGDIVISION" in df_producto.columns and mes_ultimo_cerrado:
             df_mes_div = df_producto[(df_producto["ZBIGDIVISION"] == division) & (df_producto["PERIODID3"] == mes_ultimo_cerrado)]
@@ -108,23 +99,25 @@ else:
                 r_cons = acc_bias_consensuado(df_mes_div_total, ["_Total"])
                 if not r_cons.empty:
                     fila["Accuracy Consensuado"] = float(r_cons.iloc[0]["Accuracy"])
+                    fila["Bias Consensuado"] = float(r_cons.iloc[0]["Bias"])
                 r_est = acc_estadistico(df_mes_div_total, ["_Total"])
                 if not r_est.empty:
                     fila["Accuracy Estadístico"] = float(r_est.iloc[0]["Accuracy"])
-                tabla_seg_div = cache.calcular_tabla_segmentacion(df_mes_div)
-                fila["SKU en Segmento crítico (3.2)"] = int((tabla_seg_div["Segmento"] == "3.2").sum())
+                r_bias_est = bias_estadistico(df_mes_div_total, ["_Total"])
+                if not r_bias_est.empty:
+                    fila["Bias Estadístico"] = float(r_bias_est.iloc[0]["Bias"])
 
-        if not df_ancho.empty and not df_plan.empty and "ZBIGDIVISION" in df_ancho.columns:
-            df_ancho_div = df_ancho[df_ancho["ZBIGDIVISION"] == division]
-            es_pasado = df_ancho_div["PERIODID3"].isin(meses_hist)
-            df_hf_anio = pd.concat([
-                df_ancho_div.loc[es_pasado & (df_ancho_div["Date"].dt.year == anio_actual), ["ADJUSTEDACTUALSQTY"]].rename(columns={"ADJUSTEDACTUALSQTY": "Valor"}),
-                df_ancho_div.loc[~es_pasado & (df_ancho_div["Date"].dt.year == anio_actual), ["DEMANDPLANNINGQTY"]].rename(columns={"DEMANDPLANNINGQTY": "Valor"}),
-            ], ignore_index=True)
-            total_hf_anio = df_hf_anio["Valor"].sum()
-            df_plan_div = df_plan[df_plan["ZBIGDIVISION"] == division]
-            total_plan_anio = df_plan_div.loc[df_plan_div["Date"].dt.year == anio_actual, "PLANANUAL"].sum()
-            fila["Ventas vs. Plan Anual YTD"] = (total_hf_anio / total_plan_anio - 1) if total_plan_anio else float("nan")
+                # Segundo criterio de elegibilidad de Segmento ("Alcance": forecast
+                # para los próximos MESES_PROX_FCST meses) -- SIEMPRE hay que
+                # pasarlo (ver docstring de tabla_segmentacion_sku): sin esto
+                # ningún SKU queda elegible y la columna da todo 0 (bug real,
+                # detectado por el usuario -- acá faltaba, a diferencia de
+                # Reporte Accuracy/Segmentación SKU que ya lo hacían bien).
+                meses_prox4m = periodos_empezando_en(MESES_PROX_FCST, mes_ultimo_cerrado)
+                df_full_div = df_producto[df_producto["ZBIGDIVISION"] == division]
+                df_forecast_prox4m_div = forecast_proximos_4m(df_full_div, meses_prox4m)
+                tabla_seg_div = cache.calcular_tabla_segmentacion(df_mes_div, df_forecast_prox4m_div)
+                fila["SKU en Segmento crítico (3.2)"] = int((tabla_seg_div["Segmento"] == "3.2").sum())
 
         return fila
 
@@ -134,11 +127,12 @@ else:
         tabla_resumen.style.format(
             {
                 "Accuracy Estadístico": "{:.1%}", "Accuracy Consensuado": "{:.1%}",
-                "Ventas vs. Plan Anual YTD": "{:+.1%}",
+                "Bias Estadístico": "{:+.1%}", "Bias Consensuado": "{:+.1%}",
             },
             na_rep="—",
         )
         .pipe(alertas.aplicar_semaforo_accuracy, columnas=["Accuracy Estadístico", "Accuracy Consensuado"])
+        .map(alertas.color_bias, subset=["Bias Estadístico", "Bias Consensuado"])
         .map(lambda v: f"background-color: {charts.hex_a_rgba(charts.MALO, 0.22)}" if pd.notna(v) and v > 0 else "", subset=["SKU en Segmento crítico (3.2)"]),
         width="stretch",
         hide_index=True,
@@ -148,8 +142,8 @@ else:
     for _, fila in tabla_resumen.iterrows():
         if alertas.nivel_accuracy(fila["Accuracy Consensuado"]) == "malo":
             alertas_criticas.append(f"{fila['Gran División']}: Accuracy Consensuado por debajo del 70%")
-        if alertas.nivel_brecha(fila["Ventas vs. Plan Anual YTD"]) == "malo":
-            alertas_criticas.append(f"{fila['Gran División']}: Ventas YTD por debajo del -15% vs. Plan Anual")
+        if alertas.nivel_bias(fila["Bias Consensuado"]) == "malo":
+            alertas_criticas.append(f"{fila['Gran División']}: Bias Consensuado fuera de ±5%")
         if fila["SKU en Segmento crítico (3.2)"] > 0:
             alertas_criticas.append(f"{fila['Gran División']}: {fila['SKU en Segmento crítico (3.2)']} SKU en Segmento 3.2 (crítico)")
 
@@ -230,7 +224,7 @@ else:
 
     col1, col2 = st.columns(2)
     with col1:
-        st.subheader("📊 Tablero Forecast IBP")
+        st.subheader("📊 IBP Forecast")
         st.write("Histórico de ventas, forecast, plan anual y propuestas FCST.")
         st.page_link("pages/1_Historico_de_ventas.py", label="Histórico de ventas", icon="📈")
         st.page_link("pages/2_Forecast.py", label="Forecast", icon="🔮")

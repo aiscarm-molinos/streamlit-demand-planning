@@ -64,7 +64,11 @@ serie = df_f.groupby(["Date", "Tipo"], as_index=False)["Valor"].sum()
 # (una por Tipo, cada una con su propio fill a cero) la transición queda
 # limpia, igual que ya se ve en "Plan Anual vs Histórico + FCST".
 mes_actual = periodos_futuros_mes(1)[0]
-fig_serie = charts.area_superpuesta(serie, "Date", "Valor", "Tipo", title="Valor por Tipo")
+# Sin título (a pedido del usuario, 2026-09-18): "Valor por Tipo" se
+# superponía visualmente con la leyenda horizontal (ambos anclados cerca
+# del borde superior del gráfico, ver charts._base_layout) -- la leyenda
+# ya identifica las series (Histórico Ajustado / 12 - Estimado Consensuado).
+fig_serie = charts.area_superpuesta(serie, "Date", "Valor", "Tipo")
 # Marca dónde termina lo cerrado y arranca el mes en curso -- sin esto hay
 # que leer el eje de fechas para ubicar "dónde estamos parados" en el área.
 # ``add_vline`` (con pd.Timestamp o con string) rompe acá con

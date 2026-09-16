@@ -30,7 +30,7 @@ paginas_experimentos_sagemaker = [
 if st.session_state.get("datos_cargados", False):
     paginas = {
         "": [inicio],
-        "Tablero Forecast IBP": [
+        "IBP Forecast": [
             st.Page("pages/1_Historico_de_ventas.py", title="Histórico de ventas", icon="📈"),
             st.Page("pages/2_Forecast.py", title="Forecast", icon="🔮"),
             st.Page("pages/3_Plan_Anual.py", title="Plan Anual", icon="🗓️"),

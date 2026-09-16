@@ -40,11 +40,16 @@ def _base_layout(fig: go.Figure, title: str = None) -> go.Figure:
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-        margin=dict(l=10, r=10, t=40 if title else 10, b=10),
+        margin=dict(l=10, r=10, t=60 if title else 10, b=10),
         hovermode="x unified",
     )
     if title:
-        fig.update_layout(title=title)
+        # title.y con yref "container" (relativo a TODA la figura, no solo al
+        # área del gráfico) para que quede arriba de todo -- por default,
+        # Plotly lo ubica cerca del borde superior del área del gráfico, la
+        # misma franja donde cae la leyenda horizontal (y=1.02 de arriba), y
+        # se superponen (a pedido del usuario, 2026-09-18).
+        fig.update_layout(title=dict(text=title, y=0.98, yanchor="top", x=0, xanchor="left"))
     fig.update_xaxes(showgrid=False)
     fig.update_yaxes(showgrid=True, gridcolor="rgba(137,135,129,0.25)", zeroline=False)
     return fig
