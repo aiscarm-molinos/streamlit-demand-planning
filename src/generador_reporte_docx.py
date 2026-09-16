@@ -73,9 +73,16 @@ def _texto_celda(cell, texto: str, negrita: bool = False, centrado: bool = True,
 
 
 def _agregar_logo(doc: Document) -> None:
-    if os.path.exists(LOGO_PATH):
-        doc.add_picture(LOGO_PATH, width=Inches(1.3))
-        doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    """Logo en el ENCABEZADO del documento (no en el cuerpo) -- a pedido
+    del usuario (2026-09-17), para que el título quede más arriba en vez
+    de correrse por un párrafo de imagen en el cuerpo."""
+    if not os.path.exists(LOGO_PATH):
+        return
+    header = doc.sections[0].header
+    header.is_linked_to_previous = False  # sin esto Word puede no aplicar el contenido del header de la 1ra sección
+    p = header.paragraphs[0] if header.paragraphs else header.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    p.add_run().add_picture(LOGO_PATH, width=Inches(1.2))
 
 
 def _titulo_seccion(doc: Document, texto: str) -> None:
@@ -114,6 +121,24 @@ def _bullets(doc: Document, items: list) -> None:
         doc.paragraphs[-1].paragraph_format.space_after = Pt(8)
 
 
+def _fijar_ancho_columnas(tabla, anchos: list) -> None:
+    """Ancho fijo por columna (``Cm``), en vez del autofit de Word que
+    estira la tabla al ancho completo de la página -- en tablas con pocas
+    columnas y texto corto eso las deja muy "achatadas" (filas finísimas
+    de punta a punta), a pedido del usuario (2026-09-17). Hay que fijar el
+    ancho en CADA celda, no solo en ``table.columns[i].width``: Word
+    ignora el segundo si las celdas ya tienen un ancho explícito distinto
+    (comportamiento conocido de python-docx)."""
+    tabla.autofit = False
+    for row in tabla.rows:
+        for i, ancho in enumerate(anchos):
+            if i < len(row.cells):
+                row.cells[i].width = ancho
+    for i, ancho in enumerate(anchos):
+        if i < len(tabla.columns):
+            tabla.columns[i].width = ancho
+
+
 def _espaciador(doc: Document) -> None:
     """Separa un cuadro del siguiente -- sin esto, dos tablas seguidas
     quedan pegadas (visualmente parecen una sola) y el título de la
@@ -122,7 +147,24 @@ def _espaciador(doc: Document) -> None:
     p.paragraph_format.space_after = Pt(10)
 
 
-def _tabla_pivot_semaforo(doc: Document, tabla: pd.DataFrame, es_bias: bool = False) -> None:
+UMBRAL_BIAS_EXTREMO = 10.0  # +/-1000% -- por encima/debajo, "<-1000%"/">+1000%" en vez del número (ver _formato_bias)
+
+
+def _formato_bias(valor: float, capar_extremos: bool) -> str:
+    """``+X%`` normal -- si ``capar_extremos`` y el valor supera
+    +/-1000% (típico de un Área/Gran Cuenta con Actual casi 0 en el
+    denominador del Bias, no un error de cálculo), muestra "< -1000%"/
+    "> +1000%" en vez del número real -- a pedido del usuario (2026-09-17),
+    los valores exactos ahí no aportan y distraen de las columnas con
+    datos representativos."""
+    if capar_extremos and valor < -UMBRAL_BIAS_EXTREMO:
+        return "< -1000%"
+    if capar_extremos and valor > UMBRAL_BIAS_EXTREMO:
+        return "> +1000%"
+    return f"{valor:+.0%}"
+
+
+def _tabla_pivot_semaforo(doc: Document, tabla: pd.DataFrame, es_bias: bool = False, capar_extremos: bool = False, compacto: bool = False) -> None:
     """``tabla``: index ``(Gran División, Métrica)``, columnas = meses o
     áreas -- misma forma que ``reporte_mensual.accuracy_bias_gran_division_historico``/
     ``accuracy_bias_area``. Una fila de Word por cada fila de ``tabla``, con
@@ -132,7 +174,14 @@ def _tabla_pivot_semaforo(doc: Document, tabla: pd.DataFrame, es_bias: bool = Fa
     (la segunda queda vacía) -- escribirlo en las dos y recién después
     fusionar duplica el texto ("Alimentos" aparece dos veces apiladas
     dentro de la misma celda, ``cell.merge()`` concatena los párrafos de
-    ambas celdas de origen en vez de reemplazarlos)."""
+    ambas celdas de origen en vez de reemplazarlos). ``capar_extremos``:
+    ver ``_formato_bias`` -- usado en Área Comercial/Gran Cuenta (Bodegas y
+    Snacks tienen Actual casi 0 en algunas áreas, dispara Bias de miles de
+    %), NO en Gran División (ahí no pasa, los totales no se acercan a 0).
+    ``compacto``: ancho fijo por columna en vez de autofit (ver
+    ``_fijar_ancho_columnas``) -- usado en Área Comercial (2026-09-17, "más
+    cuadrada, no tan achatada"), NO en Gran División/Gran Cuenta (no se
+    pidió ahí -- Gran Cuenta ya necesita las 12 columnas anchas)."""
     if tabla.empty:
         _parrafo(doc, "Sin datos suficientes para esta tabla.")
         return
@@ -164,12 +213,15 @@ def _tabla_pivot_semaforo(doc: Document, tabla: pd.DataFrame, es_bias: bool = Fa
             if pd.isna(valor):
                 _texto_celda(celda, "—")
             elif es_bias:
-                _texto_celda(celda, f"{valor:+.0%}")
+                _texto_celda(celda, _formato_bias(valor, capar_extremos))
                 _sombrear_celda(celda, _HEX_NIVEL[alertas.nivel_bias(valor)])
             else:
                 _texto_celda(celda, f"{valor:.0%}")
                 _sombrear_celda(celda, _HEX_NIVEL[alertas.nivel_accuracy(valor)])
         fila_division_anterior = division
+
+    if compacto:
+        _fijar_ancho_columnas(t, [Cm(2.6), Cm(2.3)] + [Cm(2.2)] * len(columnas))
 
     # Fusiona la columna "Gran división" cada 2 filas (Fcst Estad./Fcst Cons.)
     filas_datos = t.rows[1:]
@@ -188,7 +240,13 @@ def _tabla_ranking(doc: Document, tabla: pd.DataFrame, col_nombre: str, etiqueta
     Estad.] | Cons vs Est | Cons vs Est U6M. ``fila_total``: indicadores
     GLOBALES opcionales (ver ``reporte_mensual.accuracy_libre_de_gluten``)
     -- se renderiza como primera fila, en negrita y con las columnas de
-    Bias (Gran Negocio no las pasa, así que no aparecen ahí)."""
+    Bias (Gran Negocio no las pasa, así que no aparecen ahí).
+
+    Ancho fijo por columna (2026-09-17, a pedido del usuario): sin
+    ``col_desc`` (Gran Negocio) la tabla queda compacta/"más cuadrada" en
+    vez de estirada al ancho completo de la página; con ``col_desc``
+    (Libre de Gluten) la columna de Descripción queda bien ancha para que
+    la descripción del SKU no se parta en varios renglones."""
     if tabla.empty and not fila_total:
         _parrafo(doc, "Sin datos suficientes para esta tabla.")
         return
@@ -239,16 +297,29 @@ def _tabla_ranking(doc: Document, tabla: pd.DataFrame, col_nombre: str, etiqueta
     for _, fila in tabla.iterrows():
         _fila(fila.to_dict())
 
+    n_numericas = 2 + (2 if mostrar_bias else 0) + 2  # Consenso/Estadístico [+Bias Cons./Estad.] + Cons vs Est/U6M
+    if columnas_extra:
+        _fijar_ancho_columnas(t, [Cm(1.4), Cm(7.0)] + [Cm(1.75)] * n_numericas)
+    else:
+        _fijar_ancho_columnas(t, [Cm(4.0)] + [Cm(2.4)] * n_numericas)
+
     _espaciador(doc)
 
 
 def generar_docx(datos: dict) -> bytes:
     """``datos`` -- dict armado por la página (ver ``pages/0_Inicio.py``):
-    mes_nombre, mes, mes_anterior, tabla_acc_division, tabla_bias_division,
-    texto_acc_division, texto_bias_division, tabla_negocio, texto_negocio,
-    tabla_ldg, indicadores_globales_ldg, texto_ldg, tabla_acc_area_comercial, tabla_bias_area_comercial,
+    mes_nombre, mes, anio, mes_anterior, tabla_acc_division, tabla_bias_division,
+    texto_acc_division, tabla_negocio, texto_negocio, tabla_ldg,
+    indicadores_globales_ldg, tabla_acc_area_comercial, tabla_bias_area_comercial,
     tabla_acc_area_cuenta, tabla_bias_area_cuenta. Devuelve los bytes del
-    .docx -- no escribe nada a disco."""
+    .docx -- no escribe nada a disco.
+
+    Formato final acordado con el usuario (2026-09-17, ver ``reporte_final.docx``
+    que pasó como referencia): Bias Gran División, Libre de Gluten y Área
+    Gran Cuenta van SIN texto narrativo/explicativo antes de la tabla (a
+    diferencia de Accuracy Gran División y Gran Negocio, que sí llevan
+    bullets) -- por eso ``texto_bias_division``/``texto_ldg`` ya no están
+    en este dict ni se usan acá."""
     doc = Document()
     doc.styles["Normal"].font.name = FUENTE  # base de todo el documento -- lo que no se toca explícitamente hereda esto
 
@@ -260,7 +331,7 @@ def generar_docx(datos: dict) -> bytes:
 
     _agregar_logo(doc)
 
-    titulo = doc.add_heading(f"Reporte de Resultados - Forecast {datos['mes_nombre'].capitalize()}", level=1)
+    titulo = doc.add_heading(f"Reporte de Resultados - Forecast {datos['mes_nombre'].capitalize()} {datos['anio']}", level=1)
     for run in titulo.runs:
         _fuente(run, color=AZUL_TITULO)
 
@@ -273,7 +344,7 @@ def generar_docx(datos: dict) -> bytes:
     )
 
     _titulo_seccion(doc, "Accuracy Gran División - Total Molinos")
-    _parrafo(doc, datos["texto_acc_division"])
+    _bullets(doc, datos["texto_acc_division"])
     _tabla_pivot_semaforo(doc, datos["tabla_acc_division"])
 
     _titulo_seccion(doc, "Bias Gran División – Total Molinos")
@@ -282,7 +353,6 @@ def generar_docx(datos: dict) -> bytes:
         "El Bias mide el desvío del forecast respecto a las entregas reales. Un Bias positivo indica una "
         "sobreestimación, mientras que un Bias negativo refleja una subestimación.",
     )
-    _parrafo(doc, datos["texto_bias_division"])
     _tabla_pivot_semaforo(doc, datos["tabla_bias_division"], es_bias=True)
 
     _titulo_seccion(doc, "Accuracy Gran Negocio – Total Molinos")
@@ -290,29 +360,25 @@ def generar_docx(datos: dict) -> bytes:
     _tabla_ranking(doc, datos["tabla_negocio"], "ZBIGBUSINESS", "Gran negocio")
 
     _titulo_seccion(doc, "Accuracy Libre de Gluten – Total Molinos")
-    _parrafo(
-        doc,
-        "Aproximado por SKU de Refrigerados, Pasta Seca, Rebozador, Premezclas u Horneables cuya "
-        "descripción contiene \"LDG\" o \"Gluten\" -- no existe un atributo dedicado en SAP. La primera fila "
-        "(\"Total SKU Libre de Gluten\") agrega todos esos SKU juntos.",
-    )
-    _bullets(doc, datos["texto_ldg"])
     _tabla_ranking(doc, datos["tabla_ldg"], "PRDID", "SKU", col_desc="PRDDESCR", fila_total=datos.get("indicadores_globales_ldg"))
 
     _titulo_seccion(doc, "Accuracy y Bias Gran División – Área Comercial")
     _subtitulo(doc, "Accuracy")
-    _tabla_pivot_semaforo(doc, datos["tabla_acc_area_comercial"])
+    _tabla_pivot_semaforo(doc, datos["tabla_acc_area_comercial"], compacto=True)
     _subtitulo(doc, "Bias")
-    _tabla_pivot_semaforo(doc, datos["tabla_bias_area_comercial"], es_bias=True)
+    _tabla_pivot_semaforo(doc, datos["tabla_bias_area_comercial"], es_bias=True, capar_extremos=True, compacto=True)
 
     _titulo_seccion(doc, "Accuracy y Bias Gran División – Área Gran Cuenta")
-    _parrafo(doc, "Cuentas aproximadas por volumen histórico -- no hay un flag \"Gran Cuenta\" en los datos.")
     _subtitulo(doc, "Accuracy")
     _tabla_pivot_semaforo(doc, datos["tabla_acc_area_cuenta"])
     _subtitulo(doc, "Bias")
-    _tabla_pivot_semaforo(doc, datos["tabla_bias_area_cuenta"], es_bias=True)
+    _tabla_pivot_semaforo(doc, datos["tabla_bias_area_cuenta"], es_bias=True, capar_extremos=True)
 
-    _parrafo(doc, "Toda la información presentada en este reporte puede consultarse a nivel de cliente, SKU o familia de productos en el tablero.")
+    _parrafo(
+        doc,
+        "Toda la información presentada en este reporte puede consultarse a nivel de cliente, SKU o familia de "
+        "productos en el tablero de Forecast Accuracy en la sección de Abastecimiento del CIC",
+    )
 
     buffer = io.BytesIO()
     doc.save(buffer)

@@ -148,8 +148,17 @@ def _tabla_accuracy_nivel(df_producto: pd.DataFrame, group_col: str, mes: str, m
     return tabla.sort_values("Consensuado", ascending=False, na_position="last")
 
 
+def _solo_con_accuracy(tabla: pd.DataFrame) -> pd.DataFrame:
+    """Descarta filas sin ningún accuracy calculable en el mes (sin
+    Actual/Forecast en ese período -- típicamente de baja o sin ventas) --
+    a pedido del usuario, "que aparezcan los que tienen accuracy nomás"
+    (Gran Negocio, 2026-09-17; Libre de Gluten, 2026-09-16)."""
+    return tabla[tabla["Consensuado"].notna() | tabla["Estadistico"].notna()]
+
+
 def accuracy_gran_negocio(df_producto: pd.DataFrame, mes: str, meses_u6m: list) -> pd.DataFrame:
-    return _tabla_accuracy_nivel(df_producto, "ZBIGBUSINESS", mes, meses_u6m)
+    tabla = _tabla_accuracy_nivel(df_producto, "ZBIGBUSINESS", mes, meses_u6m)
+    return _solo_con_accuracy(tabla)
 
 
 def accuracy_libre_de_gluten(df_producto: pd.DataFrame, df_master: pd.DataFrame, mes: str, meses_u6m: list) -> tuple:
@@ -166,11 +175,10 @@ def accuracy_libre_de_gluten(df_producto: pd.DataFrame, df_master: pd.DataFrame,
     en_descripcion = df_master["PRDDESCR"].astype(str).str.contains("LDG|GLUTEN", case=False, na=False, regex=True)
     skus_ldg = set(df_master.loc[en_negocio & en_descripcion, "PRDID"].astype(str).unique())
 
-    tabla_skus = _tabla_accuracy_nivel(df_producto, "PRDID", mes, meses_u6m, filtro_prdid=skus_ldg)
-    # Descarta SKU sin ningún accuracy calculable en el mes (sin Actual/Forecast
-    # en ese período -- típicamente de baja o sin ventas) -- a pedido del
-    # usuario, "que traiga algo de accuracy" (2026-09-16).
-    tabla_skus = tabla_skus[tabla_skus["Consensuado"].notna() | tabla_skus["Estadistico"].notna()]
+    # incluir_bias=True: el usuario notó que el Bias por SKU no aparecía en
+    # la tabla del .docx -- faltaba pasarlo acá (2026-09-17).
+    tabla_skus = _tabla_accuracy_nivel(df_producto, "PRDID", mes, meses_u6m, filtro_prdid=skus_ldg, incluir_bias=True)
+    tabla_skus = _solo_con_accuracy(tabla_skus)
     tabla_skus = tabla_skus.merge(df_master[["PRDID", "PRDDESCR"]].drop_duplicates(), on="PRDID", how="left")
 
     tabla_total = _tabla_accuracy_nivel(

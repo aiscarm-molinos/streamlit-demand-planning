@@ -26,6 +26,13 @@ def nombre_mes(periodid3: str) -> str:
     return MESES_ES[fecha.month]
 
 
+def anio_mes(periodid3: str) -> int:
+    """'26-Aug' -> 2026 -- para el título del reporte (a pedido del
+    usuario, 2026-09-17)."""
+    from src.utils.listas_periodos import periodid3_a_fecha
+    return periodid3_a_fecha(periodid3).year
+
+
 def _comparacion(valor_actual: float, valor_anterior: float, mes_anterior_nombre: str) -> str:
     if pd.isna(valor_anterior):
         return ""
@@ -35,15 +42,19 @@ def _comparacion(valor_actual: float, valor_anterior: float, mes_anterior_nombre
     return f", {direccion} del {valor_anterior:.0%} registrado en {mes_anterior_nombre}"
 
 
-def texto_accuracy_gran_division(tabla_accuracy: pd.DataFrame, mes: str, mes_anterior: str) -> str:
-    """Un párrafo por división -- accuracy consensuado y estadístico del
-    mes, comparado contra el mes anterior si está disponible en la tabla."""
+def texto_accuracy_gran_division(tabla_accuracy: pd.DataFrame, mes: str, mes_anterior: str) -> list:
+    """Un bullet por división -- accuracy consensuado y estadístico del
+    mes, comparado contra el mes anterior si está disponible en la tabla.
+    Devuelve una lista (una por división, ver ``_bullets`` en
+    ``generador_reporte_docx.py``) -- antes era un párrafo único con un
+    "\\n" por división; a pedido del usuario (2026-09-17), formato punteo
+    igual que Gran Negocio/Libre de Gluten."""
     if tabla_accuracy.empty or mes not in tabla_accuracy.columns:
-        return "No hay datos de accuracy para el mes seleccionado."
+        return ["No hay datos de accuracy para el mes seleccionado."]
 
     mes_nombre = nombre_mes(mes)
     mes_ant_nombre = nombre_mes(mes_anterior) if mes_anterior in tabla_accuracy.columns else None
-    frases = []
+    bullets = []
     for division in tabla_accuracy.index.get_level_values(0).unique():
         cons = tabla_accuracy.loc[(division, "Fcst Cons."), mes] if (division, "Fcst Cons.") in tabla_accuracy.index else float("nan")
         est = tabla_accuracy.loc[(division, "Fcst Estad."), mes] if (division, "Fcst Estad.") in tabla_accuracy.index else float("nan")
@@ -53,53 +64,29 @@ def texto_accuracy_gran_division(tabla_accuracy: pd.DataFrame, mes: str, mes_ant
         comp_cons = _comparacion(cons, cons_ant, mes_ant_nombre) if mes_ant_nombre else ""
         comp_est = _comparacion(est, est_ant, mes_ant_nombre) if mes_ant_nombre else ""
 
-        frases.append(
-            f"En {division}, el forecast consensuado se ubicó en {cons:.0%}{comp_cons}. "
+        bullets.append(
+            f"{division}: el forecast consensuado se ubicó en {cons:.0%}{comp_cons}. "
             f"El estadístico se ubicó en {est:.0%}{comp_est}."
-            if pd.notna(cons) and pd.notna(est) else f"En {division} no hay datos suficientes para {mes_nombre}."
+            if pd.notna(cons) and pd.notna(est) else f"{division}: no hay datos suficientes para {mes_nombre}."
         )
 
-    return f"En {mes_nombre}, " + frases[0][3:] + "\n" + "\n".join(frases[1:])
-
-
-def texto_bias_gran_division(tabla_bias: pd.DataFrame, mes: str) -> str:
-    """Un párrafo por división con el Bias estadístico/consensuado del mes,
-    con la interpretación de dirección (sobre/subestimación)."""
-    if tabla_bias.empty or mes not in tabla_bias.columns:
-        return "No hay datos de Bias para el mes seleccionado."
-
-    frases = []
-    for division in tabla_bias.index.get_level_values(0).unique():
-        est = tabla_bias.loc[(division, "Fcst Estad."), mes] if (division, "Fcst Estad.") in tabla_bias.index else float("nan")
-        cons = tabla_bias.loc[(division, "Fcst Cons."), mes] if (division, "Fcst Cons.") in tabla_bias.index else float("nan")
-        if pd.isna(est) or pd.isna(cons):
-            frases.append(f"{division}: sin datos suficientes de Bias.")
-            continue
-        dir_est = "sobreestimación" if est > 0 else "subestimación"
-        dir_cons = "sobreestimación" if cons > 0 else "subestimación"
-        if dir_est == dir_cons and abs(cons) < abs(est):
-            cierre = f"El consensuado redujo la {dir_est} del estadístico."
-        elif dir_est == dir_cons:
-            cierre = f"El consensuado amplió la {dir_est} del estadístico."
-        else:
-            cierre = "El consensuado invirtió la dirección del sesgo del estadístico."
-        frases.append(
-            f"{division} presentó un Bias estadístico de {est:+.1%} y consensuado de {cons:+.1%}. {cierre}"
-        )
-
-    return "\n".join(frases)
+    return bullets
 
 
 def texto_destacados(
     tabla: pd.DataFrame, col_nombre: str, col_consensuado: str = "Consensuado",
     col_aporte: str = "Cons vs Est", top_n: int = 3, bottom_n: int = 2,
-    nombre_seccion: str = "los casos",
+    nombre_seccion: str = "los casos", incluir_rezagados: bool = True,
 ) -> list:
-    """Bullets de "líderes"/"mayor aporte"/"impacto negativo"/"parte baja
-    del ranking" -- generaliza el patrón real observado en Gran Negocio y
+    """Bullets de "líderes"/"mayor aporte"/"impacto negativo"[/"parte baja
+    del ranking"] -- generaliza el patrón real observado en Gran Negocio y
     Libre de Gluten (misma estructura de callouts, distinto nivel de
     agrupación). Devuelve una lista de strings (una por bullet), no un solo
-    párrafo -- el renderer arma la lista con viñetas."""
+    párrafo -- el renderer arma la lista con viñetas. ``incluir_rezagados``:
+    ``False`` en Gran Negocio (a pedido del usuario, 2026-09-17, ver
+    ``reporte_final.docx`` que pasó como referencia) -- ese bullet solía
+    resaltar entidades de volumen irrelevante (ej. "Tienda Molinos" con
+    0%, ver rugosidad conocida en CLAUDE.md)."""
     tabla = tabla.dropna(subset=[col_consensuado])
     if tabla.empty:
         return [f"No hay datos suficientes para destacar {nombre_seccion}."]
@@ -124,9 +111,10 @@ def texto_destacados(
                 f"señalando una oportunidad de mejora en la planificación."
             )
 
-    rezagados = tabla.nsmallest(bottom_n, col_consensuado)
-    if not rezagados.empty:
-        nombres = ", ".join(f"{f[col_nombre]} ({f[col_consensuado]:.0%})" for _, f in rezagados.iterrows())
-        bullets.append(f"En la parte baja del ranking: {nombres}.")
+    if incluir_rezagados:
+        rezagados = tabla.nsmallest(bottom_n, col_consensuado)
+        if not rezagados.empty:
+            nombres = ", ".join(f"{f[col_nombre]} ({f[col_consensuado]:.0%})" for _, f in rezagados.iterrows())
+            bullets.append(f"En la parte baja del ranking: {nombres}.")
 
     return bullets

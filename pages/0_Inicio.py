@@ -199,16 +199,15 @@ else:
             datos_reporte = {
                 "mes": mes_ultimo_cerrado,
                 "mes_nombre": narr.nombre_mes(mes_ultimo_cerrado),
+                "anio": narr.anio_mes(mes_ultimo_cerrado),
                 "mes_anterior": mes_anterior,
                 "tabla_acc_division": tabla_acc_division,
                 "tabla_bias_division": tabla_bias_division,
                 "texto_acc_division": narr.texto_accuracy_gran_division(tabla_acc_division, mes_ultimo_cerrado, mes_anterior),
-                "texto_bias_division": narr.texto_bias_gran_division(tabla_bias_division, mes_ultimo_cerrado),
                 "tabla_negocio": tabla_negocio,
-                "texto_negocio": narr.texto_destacados(tabla_negocio, "ZBIGBUSINESS", nombre_seccion="los Grandes Negocios"),
+                "texto_negocio": narr.texto_destacados(tabla_negocio, "ZBIGBUSINESS", nombre_seccion="los Grandes Negocios", incluir_rezagados=False),
                 "tabla_ldg": tabla_ldg,
                 "indicadores_globales_ldg": indicadores_globales_ldg,
-                "texto_ldg": narr.texto_destacados(tabla_ldg, "PRDDESCR", nombre_seccion="los SKU Libre de Gluten"),
                 "tabla_acc_area_comercial": tabla_acc_area_comercial,
                 "tabla_bias_area_comercial": tabla_bias_area_comercial,
                 "tabla_acc_area_cuenta": tabla_acc_area_cuenta,
@@ -218,7 +217,7 @@ else:
             docx_bytes = gendoc.generar_docx(datos_reporte)
             pdf_bytes, error_pdf = gendoc.convertir_a_pdf(docx_bytes)
 
-        nombre_archivo = f"Reporte de resultados {datos_reporte['mes_nombre'].capitalize()}"
+        nombre_archivo = f"Reporte Accuracy & Bias - {datos_reporte['mes_nombre'].capitalize()} {datos_reporte['anio']}"
         col_dl1, col_dl2 = st.columns(2)
         with col_dl1:
             st.download_button("⬇️ Descargar .docx", data=docx_bytes, file_name=f"{nombre_archivo}.docx",
