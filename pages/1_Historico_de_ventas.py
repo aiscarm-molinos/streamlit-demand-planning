@@ -116,8 +116,9 @@ with col2:
     # Barra horizontal en vez de torta: con hasta 8 porciones un pie se
     # vuelve difícil de comparar a simple vista -- una barra ordenada sí.
     mix_productos = df_hist.groupby("ZBIGBUSINESS", as_index=False)["Valor"].sum().nlargest(8, "Valor").sort_values("Valor", ascending=True)
+    mix_productos = mix_productos.rename(columns={"ZBIGBUSINESS": "Gran Negocio"})
     st.plotly_chart(
-        charts.bar_chart(mix_productos, x="Valor", y="ZBIGBUSINESS", orientation="h", title="Mix Productos"),
+        charts.bar_chart(mix_productos, x="Valor", y="Gran Negocio", orientation="h", title="Mix Productos"),
         width="stretch",
     )
 

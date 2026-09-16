@@ -57,6 +57,7 @@ st.divider()
 st.subheader("Cantidad de veces elegido como mejor nivel")
 conteo = df_mejor_nivel["MEJOR_NIVEL_PLANIFICACION"].value_counts().reset_index()
 conteo.columns = ["Nivel", "Cantidad de entidades"]
+conteo["Nivel"] = conteo["Nivel"].map(niveles.etiqueta_nivel)
 st.plotly_chart(charts.bar_chart(conteo, x="Nivel", y="Cantidad de entidades"), width="stretch")
 
 st.subheader("Detalle por entidad")
@@ -64,8 +65,8 @@ resumen = niveles.resumen_nivel_elegido(df_mejor_nivel, df_modelos, df_dataset)
 df_resumen = pd.DataFrame(
     [
         {
-            "PRDFAMILY": r.prdfamily,
-            "Nivel elegido": r.nivel,
+            "Familia": r.prdfamily,
+            "Nivel elegido": niveles.etiqueta_nivel(r.nivel),
             "Valor(es) del nivel": ", ".join(r.valores) if r.valores else "—",
             "Accuracy del nivel elegido": f"{r.accuracy_avg:.1f}%" if r.accuracy_avg is not None else "—",
             "Error absoluto total": r.error_abs_total,
@@ -76,7 +77,7 @@ df_resumen = pd.DataFrame(
 st.dataframe(df_resumen, width="stretch", hide_index=True)
 st.caption(
     "\"Accuracy del nivel elegido\" es el promedio de Accuracy_AVG (modelos_forecast_mensual.csv) entre los "
-    "valores del nivel a los que pertenece la entidad -- si el nivel elegido es más fino que PRDFAMILY (ej. "
-    "PRDID), una misma entidad puede resolver a varios valores y el número es un promedio entre ellos, no un "
+    "valores del nivel a los que pertenece la entidad -- si el nivel elegido es más fino que Familia (ej. "
+    "SKU), una misma entidad puede resolver a varios valores y el número es un promedio entre ellos, no un "
     "único accuracy exacto."
 )

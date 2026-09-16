@@ -28,6 +28,28 @@ import pandas as pd
 
 NIVELES_JERARQUIA = ["PRDID", "PRDFAMILY", "ZINDFAMILY", "ZBRAND", "ZBIGBUSINESS"]
 
+# Nombres de negocio para mostrar en UI -- los códigos crudos de
+# NIVELES_JERARQUIA sirven para matchear contra NIVEL_DE_PLANIFICACION/
+# VALOR_NIVEL y armar rutas de archivo (nombre_archivo_pkl), nunca se tocan
+# para eso; esto es solo la capa de presentación (a pedido del usuario,
+# 2026-09-19 -- mismos términos que FILTROS_IBP_PRODUCTOS/JERARQUIA_PRODUCTO
+# en filters.py, más "Familia Industrial" para ZINDFAMILY, que no aparece
+# ahí porque ese campo ni se usa en el Power BI real).
+NIVEL_LABELS = {
+    "PRDID": "SKU",
+    "PRDFAMILY": "Familia",
+    "ZINDFAMILY": "Familia Industrial",
+    "ZBRAND": "Negocio",
+    "ZBIGBUSINESS": "Gran Negocio",
+}
+
+
+def etiqueta_nivel(nivel: str) -> str:
+    """Nombre de negocio de un nivel de ``NIVELES_JERARQUIA`` -- ``nivel``
+    tal cual (sin traducir) si no está en ``NIVEL_LABELS``, nunca rompe con
+    un valor inesperado."""
+    return NIVEL_LABELS.get(nivel, nivel)
+
 
 def valores_de_nivel(df_dataset: pd.DataFrame, prdfamily: str, nivel: str) -> list[str]:
     """Valores del nivel ``nivel`` a los que pertenece la entidad ``prdfamily``,

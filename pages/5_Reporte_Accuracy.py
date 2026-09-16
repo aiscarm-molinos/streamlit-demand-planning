@@ -95,14 +95,14 @@ col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("Evolución Mensual del Accuracy & Bias")
-    acc_cons_mes = acc_bias_consensuado(df_meses, ["ZBIGDIVISION", "PERIODID3"])
-    acc_est_mes = acc_estadistico(df_meses, ["ZBIGDIVISION", "PERIODID3"])
+    acc_cons_mes = acc_bias_consensuado(df_meses, ["ZBIGDIVISION", "PERIODID3"]).rename(columns={"ZBIGDIVISION": "Gran División"})
+    acc_est_mes = acc_estadistico(df_meses, ["ZBIGDIVISION", "PERIODID3"]).rename(columns={"ZBIGDIVISION": "Gran División"})
     largo = pd.concat([
-        acc_cons_mes[["ZBIGDIVISION", "PERIODID3", "Accuracy"]].assign(Métrica="Accuracy Consensuado").rename(columns={"Accuracy": "Valor"}),
-        acc_cons_mes[["ZBIGDIVISION", "PERIODID3", "Bias"]].assign(Métrica="Bias Consensuado").rename(columns={"Bias": "Valor"}),
-        acc_est_mes[["ZBIGDIVISION", "PERIODID3", "Accuracy"]].assign(Métrica="Accuracy Estadístico").rename(columns={"Accuracy": "Valor"}),
+        acc_cons_mes[["Gran División", "PERIODID3", "Accuracy"]].assign(Métrica="Accuracy Consensuado").rename(columns={"Accuracy": "Valor"}),
+        acc_cons_mes[["Gran División", "PERIODID3", "Bias"]].assign(Métrica="Bias Consensuado").rename(columns={"Bias": "Valor"}),
+        acc_est_mes[["Gran División", "PERIODID3", "Accuracy"]].assign(Métrica="Accuracy Estadístico").rename(columns={"Accuracy": "Valor"}),
     ], ignore_index=True)
-    pivot_evolucion = pd.pivot_table(largo, index=["ZBIGDIVISION", "Métrica"], columns="PERIODID3", values="Valor")
+    pivot_evolucion = pd.pivot_table(largo, index=["Gran División", "Métrica"], columns="PERIODID3", values="Valor")
     pivot_evolucion = pivot_evolucion[[m for m in meses_analisis if m in pivot_evolucion.columns]]
     st.dataframe(
         pivot_evolucion.style.format("{:.2%}").apply(alertas.estilo_pivot_metricas, axis=1),
@@ -111,14 +111,14 @@ with col1:
 
 with col2:
     st.subheader("Accuracy & Bias Ponderado (meses seleccionados)")
-    acc_cons_tot = acc_bias_consensuado(df_meses, ["ZBIGDIVISION"])
-    acc_est_tot = acc_estadistico(df_meses, ["ZBIGDIVISION"])
+    acc_cons_tot = acc_bias_consensuado(df_meses, ["ZBIGDIVISION"]).rename(columns={"ZBIGDIVISION": "Gran División"})
+    acc_est_tot = acc_estadistico(df_meses, ["ZBIGDIVISION"]).rename(columns={"ZBIGDIVISION": "Gran División"})
     ponderado = pd.concat([
-        acc_cons_tot[["ZBIGDIVISION", "Accuracy"]].assign(Métrica="Accuracy Consensuado").rename(columns={"Accuracy": "Valor"}),
-        acc_cons_tot[["ZBIGDIVISION", "Bias"]].assign(Métrica="Bias Consensuado").rename(columns={"Bias": "Valor"}),
-        acc_est_tot[["ZBIGDIVISION", "Accuracy"]].assign(Métrica="Accuracy Estadístico").rename(columns={"Accuracy": "Valor"}),
+        acc_cons_tot[["Gran División", "Accuracy"]].assign(Métrica="Accuracy Consensuado").rename(columns={"Accuracy": "Valor"}),
+        acc_cons_tot[["Gran División", "Bias"]].assign(Métrica="Bias Consensuado").rename(columns={"Bias": "Valor"}),
+        acc_est_tot[["Gran División", "Accuracy"]].assign(Métrica="Accuracy Estadístico").rename(columns={"Accuracy": "Valor"}),
     ], ignore_index=True)
-    pivot_ponderado = pd.pivot_table(ponderado, index=["ZBIGDIVISION", "Métrica"], values="Valor")
+    pivot_ponderado = pd.pivot_table(ponderado, index=["Gran División", "Métrica"], values="Valor")
     st.dataframe(
         pivot_ponderado.style.format("{:.2%}").apply(alertas.estilo_pivot_metricas, axis=1),
         width="stretch",
@@ -130,7 +130,7 @@ acc_sku = acc_bias_consensuado(df_meses, ["PRDID"])
 df_master_prod, _, _ = cache.get_or_demo(cache.get_product_master, demo_data.producto_master_demo)
 acc_sku = acc_sku.merge(df_master_prod[["PRDID", "PRDDESCR"]].drop_duplicates(), on="PRDID", how="left")
 top_peores = acc_sku.dropna(subset=["Accuracy"]).nsmallest(10, "Accuracy")[["PRDID", "PRDDESCR", "Accuracy", "Bias"]]
-top_peores = top_peores.rename(columns={"PRDDESCR": "Descripción"})
+top_peores = top_peores.rename(columns={"PRDDESCR": "Descripción", "PRDID": "SKU"})
 st.dataframe(
     top_peores.style.format({"Accuracy": "{:.1%}", "Bias": "{:+.1%}"}).pipe(alertas.aplicar_semaforo_accuracy, columnas=["Accuracy"]),
     width="stretch",

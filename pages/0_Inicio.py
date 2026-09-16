@@ -232,7 +232,7 @@ else:
         st.page_link("pages/4_Propuestas_FCST.py", label="Propuestas FCST", icon="📝")
 
     with col2:
-        st.subheader("🎯 Tablero Forecast Accuracy IBP")
+        st.subheader("🎯 IBP Accuracy & Bias")
         st.write("Accuracy/bias del forecast, segmentación de SKU y ranking de clientes.")
         st.page_link("pages/5_Reporte_Accuracy.py", label="Reporte Accuracy", icon="✅")
         st.page_link("pages/6_Segmentacion_SKU.py", label="Segmentación SKU", icon="🧩")

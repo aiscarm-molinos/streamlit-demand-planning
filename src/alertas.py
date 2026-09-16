@@ -104,6 +104,21 @@ def color_bias(valor: float, umbral: float = UMBRAL_BIAS, alpha: float = 0.22) -
     return f"background-color: {hex_a_rgba(color, alpha)}"
 
 
+def color_bias_direccion(valor: float, alpha: float = 0.22) -> str:
+    """CSS ``background-color`` para Bias coloreado por DIRECCIÓN -- verde
+    si es positivo (sobreestimación), rojo si es negativo (subestimación),
+    sin importar la magnitud. Distinto a propósito de ``color_bias``
+    (semáforo SIMÉTRICO por magnitud, ±``UMBRAL_BIAS``, usado en el Reporte
+    de Resultados mensual): acá es a pedido puntual del usuario para la
+    tabla "Ranking por Área Comercial" de Ranking Clientes (2026-09-19),
+    donde lo que importa es de qué lado del cero cae, no si está "dentro de
+    rango"."""
+    if pd.isna(valor):
+        return ""
+    color = BUENO if valor > 0 else (MALO if valor < 0 else NEUTRO)
+    return f"background-color: {hex_a_rgba(color, alpha)}" if color != NEUTRO else ""
+
+
 def aplicar_semaforo_accuracy(styler: "pd.io.formats.style.Styler", columnas: list) -> "pd.io.formats.style.Styler":
     """``df.style.format(...).pipe(alertas.aplicar_semaforo_accuracy, columnas=[...])``
     -- para tablas donde TODAS las columnas dadas son valores de accuracy en

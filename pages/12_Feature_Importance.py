@@ -58,12 +58,12 @@ df_dataset = tarexp.leer_tabla(tar, m_dataset)
 
 st.divider()
 
-entidad = st.selectbox("Entidad (PRDFAMILY)", sorted(df_mejor_nivel["PRDFAMILY"].unique()))
+entidad = st.selectbox("Entidad (Familia)", sorted(df_mejor_nivel["PRDFAMILY"].unique()))
 fila = df_mejor_nivel[df_mejor_nivel["PRDFAMILY"] == entidad].iloc[0]
 nivel = fila["MEJOR_NIVEL_PLANIFICACION"]
 valores = niveles.valores_de_nivel(df_dataset, entidad, nivel)
 
-st.write(f"Nivel elegido para **{entidad}**: **{nivel}**" + (f" ({len(valores)} valor(es))" if len(valores) != 1 else ""))
+st.write(f"Nivel elegido para **{entidad}**: **{niveles.etiqueta_nivel(nivel)}**" + (f" ({len(valores)} valor(es))" if len(valores) != 1 else ""))
 
 if not valores:
     st.info("No se pudo resolver ningún valor de este nivel para la entidad en el dataset.")

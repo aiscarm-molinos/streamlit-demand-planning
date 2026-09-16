@@ -88,6 +88,7 @@ for col, division in zip(cols_tabla, divisiones):
             acc_areacom = acc_areacom.merge(acc_prev, on="ZAREACOMERCIAL", how="left")
             acc_areacom["Δ pp. vs. período anterior"] = (acc_areacom["Accuracy FCST Consensuado"] - acc_areacom["_AccuracyAnterior"]) * 100
             acc_areacom = acc_areacom.drop(columns=["_AccuracyAnterior"]).sort_values("Accuracy FCST Consensuado", ascending=False)
+            acc_areacom = acc_areacom.rename(columns={"ZAREACOMERCIAL": "Área Comercial"})
 
             st.dataframe(
                 acc_areacom.style.format(
@@ -95,6 +96,7 @@ for col, division in zip(cols_tabla, divisiones):
                     na_rep="—",
                 )
                 .pipe(alertas.aplicar_semaforo_accuracy, columnas=["Accuracy FCST Consensuado"])
+                .map(alertas.color_bias_direccion, subset=["Bias"])
                 .map(lambda v: f"color: {charts.MALO}; font-weight: 600" if pd.notna(v) and v <= UMBRAL_CAIDA_PP else "", subset=["Δ pp. vs. período anterior"]),
                 width="stretch",
                 hide_index=True,
@@ -109,7 +111,13 @@ for col, division in zip(cols_chart, divisiones):
     with col:
         df_div = df_meses[df_meses["ZBIGDIVISION"] == division]
         acc_areagc = acc_bias_consensuado(df_div, ["ZAREAGC"])[["ZAREAGC", "Accuracy", "Bias"]]
+        # Excluye áreas sin accuracy calculable para ESTA división (ej.
+        # "Sub-Productos"/"Otros" que existen como ZAREAGC pero no tienen
+        # volumen en esta Gran División puntual) -- a pedido del usuario,
+        # ocupaban espacio en el gráfico sin mostrar ninguna barra.
+        acc_areagc = acc_areagc.dropna(subset=["Accuracy"])
+        acc_areagc = acc_areagc.rename(columns={"ZAREAGC": "Área/GC"})
         st.plotly_chart(
-            charts.ranking_semaforo(acc_areagc, "ZAREAGC", "Accuracy", title=f"{division} - Accuracy por Cuentas", hover_data={"Bias": ":+.1%"}),
+            charts.ranking_semaforo(acc_areagc, "Área/GC", "Accuracy", title=f"{division} - Accuracy por Cuentas", hover_data={"Bias": ":+.1%"}),
             width="stretch",
         )

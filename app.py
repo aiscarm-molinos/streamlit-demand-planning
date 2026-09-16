@@ -36,7 +36,7 @@ if st.session_state.get("datos_cargados", False):
             st.Page("pages/3_Plan_Anual.py", title="Plan Anual", icon="🗓️"),
             st.Page("pages/4_Propuestas_FCST.py", title="Propuestas FCST", icon="📝"),
         ],
-        "Tablero Forecast Accuracy IBP": [
+        "IBP Accuracy & Bias": [
             st.Page("pages/5_Reporte_Accuracy.py", title="Reporte Accuracy", icon="✅"),
             st.Page("pages/6_Segmentacion_SKU.py", title="Segmentación SKU", icon="🧩"),
             st.Page("pages/7_Ranking_Clientes.py", title="Ranking Clientes", icon="🏆"),

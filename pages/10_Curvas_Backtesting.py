@@ -15,6 +15,7 @@ import streamlit as st
 
 from src import charts
 from src import experimentos_sagemaker_estado as estado
+from src import nivel_planificacion as niveles
 from src.data import model_tar_explorer as tarexp
 
 st.title("📉 Curvas de Backtesting")
@@ -34,7 +35,9 @@ st.divider()
 
 col1, col2 = st.columns(2)
 with col1:
-    nivel = st.selectbox("Nivel de planificación", sorted(df["NIVEL_DE_PLANIFICACION"].unique()))
+    nivel = st.selectbox(
+        "Nivel de planificación", sorted(df["NIVEL_DE_PLANIFICACION"].unique()), format_func=niveles.etiqueta_nivel
+    )
 with col2:
     valores_nivel = sorted(df.loc[df["NIVEL_DE_PLANIFICACION"] == nivel, "VALOR_NIVEL"].astype(str).unique())
     valor = st.selectbox("Entidad", valores_nivel)
