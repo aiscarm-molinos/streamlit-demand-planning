@@ -10,7 +10,7 @@ Invocado como subproceso aislado desde ``src/data/model_deserializer.py``
 (que corre en el venv principal) -- así el venv de la app nunca necesita
 tener instalados skforecast/xgboost/lightgbm/catboost/numpy en la versión
 exacta de entrenamiento, que es incompatible con el Python 3.13 de la app
-(ver CLAUDE.md, sección "Experimentos SageMaker" / Feature Importance).
+(ver CLAUDE.md, sección "AWS SageMaker" / Feature Importance).
 
 Uso: ``python feature_importance_subproceso.py <ruta_al_pkl>``
 Salida (stdout, una sola línea JSON):

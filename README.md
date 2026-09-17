@@ -26,13 +26,13 @@ Además de la réplica funcional, la app agrega una capa propia de **alertas acc
 | Ranking Clientes | Ranking de accuracy por Área Comercial y Área/GC, separado por Gran División |
 | Glosario | Definiciones reales de indicadores y segmentos (texto de las medidas DAX originales) |
 
-### Experimentos SageMaker
+### AWS SageMaker
 
 Sección aparte, sin relación con los dos tableros de arriba (no depende de SAP IBP/Athena, así que es accesible aunque esos datos no hayan terminado de precargarse). Explora los experimentos de forecast que el equipo de Supply corre en AWS SageMaker, guardados en `exp/<usuario>/{input,models,predictions,processed}` dentro del bucket S3 `ibp-forecast-sagemaker-data-595365649575`. 4 páginas, que comparten el mismo "entrenamiento activo" (se elige una vez en la primera, las otras 3 lo reusan):
 
 | Página | Contenido |
 |---|---|
-| Experimentos SageMaker | Navegación en cascada usuario → carpeta → entrenamiento, tabla de contenido tipo consola S3, explorador de `reports/`/`trained_models/`/dataset de un `model.tar` |
+| Explorador de Entrenamientos | Navegación en cascada usuario → carpeta → entrenamiento, tabla de contenido tipo consola S3, explorador de `reports/`/`trained_models/`/dataset de un `model.tar` |
 | Curvas de Backtesting | Real vs Predicción a lo largo del tiempo, por entidad (`reports/accuracy_forecast_mensual.csv`) |
 | Nivel de Planificación | Cuántas veces cada nivel de la jerarquía de producto fue elegido como mejor, y su accuracy (`reports/mejor_nivel_planificacion_por_entidad.csv` + `modelos_forecast_mensual.csv`) |
 | Feature Importance | Qué variables pesaron más en la predicción de los modelos elegidos como mejores (deserializa los `.pkl` de `trained_models/`) |
@@ -52,7 +52,7 @@ py -3.10 -m venv .venv310
 ```
 Si la red corporativa da `SSLError: self-signed certificate in certificate chain` al instalar (mismo proxy/CA interna que documenta `settings.py`), agregar `--trusted-host pypi.org --trusted-host files.pythonhosted.org` al `pip install`. Si además aparece `NameError: name 'pkg_resources' is not defined` al cargar un modelo, es porque `setuptools` reciente ya no lo incluye — `pip install "setuptools==70.0.0"` en ese mismo venv lo resuelve.
 
-`.venv310/` es gitignorado (igual que `.venv/`) — sin este setup, la página "Feature Importance" muestra un aviso explicando qué falta en vez de romper; el resto de la app (incluidas las otras 3 páginas de Experimentos SageMaker) funciona igual sin él.
+`.venv310/` es gitignorado (igual que `.venv/`) — sin este setup, la página "Feature Importance" muestra un aviso explicando qué falta en vez de romper; el resto de la app (incluidas las otras 3 páginas de AWS SageMaker) funciona igual sin él.
 
 ## Cómo correr la app
 
@@ -75,7 +75,7 @@ Ninguna credencial se commitea (`.gitignore` cubre `*.env`). Ver `.env.example` 
 - **`ibp.env`** — SAP IBP OData: `IBP_USERNAME`, `IBP_PASSWORD`, `IBP_BASE_URL`, `IBP_PA_DEMANDA`.
 - **`aws.env`** — AWS Athena: `AWS_PROFILE`, `AWS_REGION`, `AWS_DATABASE`, `AWS_S3_STAGING`.
 - **`aws_credentials.env`** (opcional) — credenciales AWS explícitas (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_SESSION_TOKEN`) cuando no hay un perfil SSO configurado localmente; tienen prioridad sobre `AWS_PROFILE`. Son temporales (SSO) y expiran cada tantas horas — al vencer, la app cae sola a modo demo para Athena.
-- **`s3_sagemaker.env`** — AWS S3 para "Experimentos SageMaker": `AWS_PROFILE_SAGEMAKER`/`AWS_REGION_SAGEMAKER` (o credenciales explícitas `*_SAGEMAKER`), `AWS_S3_SAGEMAKER_BUCKET`, `AWS_S3_SAGEMAKER_PREFIX`. Cuenta y rol **distintos** de los de Athena (cuenta `AI_Platform_DEV`, rol `MRP_Analistas_IBP_AWS`) — no reutiliza `AWS_PROFILE`/`aws_credentials.env` de arriba.
+- **`s3_sagemaker.env`** — AWS S3 para "AWS SageMaker": `AWS_PROFILE_SAGEMAKER`/`AWS_REGION_SAGEMAKER` (o credenciales explícitas `*_SAGEMAKER`), `AWS_S3_SAGEMAKER_BUCKET`, `AWS_S3_SAGEMAKER_PREFIX`. Cuenta y rol **distintos** de los de Athena (cuenta `AI_Platform_DEV`, rol `MRP_Analistas_IBP_AWS`) — no reutiliza `AWS_PROFILE`/`aws_credentials.env` de arriba.
 
 **Después de cambiar cualquier `*.env` o cualquier archivo de `src/`, hay que reiniciar el proceso de Streamlit** (`Ctrl+C` y volver a correr `streamlit run app.py`) — el botón "🔄 Recargar datos" del Inicio no alcanza, solo limpia el cache de datos, no reimporta módulos de Python.
 
@@ -95,7 +95,7 @@ src/
   filters.py            → sidebars compartidos (Período/Clientes/Productos) de los dos tableros
   charts.py             → helpers de gráficos Plotly (paleta y layout consistentes)
 scripts/feature_importance_subproceso.py → corre con .venv310 (Python 3.10), no con el venv principal
-sample_data/sagemaker/  → (gitignored) .tar de ejemplo para probar "Experimentos SageMaker" en local
+sample_data/sagemaker/  → (gitignored) .tar de ejemplo para probar "AWS SageMaker" en local
 requirements_fcst.txt   → pins EXACTOS del training de SageMaker (para .venv310, no para el venv principal)
 ```
 
@@ -133,6 +133,6 @@ UOM = `UMG` para todas las series y para el maestro de clientes; `CAJ` solo para
 - No es pixel-perfect contra los `.pbix` originales (algunos sliders son multiselect en vez de range slider, falta algún banner de texto decorativo).
 - El histórico visible es de 24 meses hacia atrás / 12 hacia adelante (configurable en `cache.py::MESES_HISTORICOS`/`MESES_FUTUROS`) por costo de carga contra SAP — el Power BI real muestra más años de histórico.
 - Detalle de cliente limitado a Área/GC en las consultas de series (ver "Reglas de negocio clave" arriba) — es una limitación real del Gateway de SAP, no de esta app.
-- "Experimentos SageMaker" no puede descargar/explorar un `model.tar` desde S3 todavía — el rol `MRP_Analistas_IBP_AWS` solo tiene permiso de listado (`s3:ListBucket`), no de descarga (`s3:GetObject`). Mientras se gestiona el permiso, la exploración de contenido funciona en modo local con un `.tar` de ejemplo en `sample_data/sagemaker/`.
+- "AWS SageMaker" no puede descargar/explorar un `model.tar` desde S3 todavía — el rol `MRP_Analistas_IBP_AWS` solo tiene permiso de listado (`s3:ListBucket`), no de descarga (`s3:GetObject`). Mientras se gestiona el permiso, la exploración de contenido funciona en modo local con un `.tar` de ejemplo en `sample_data/sagemaker/`.
 
 Ver [`CLAUDE.md`](./CLAUDE.md) para el detalle completo de cada uno de estos puntos, decisiones de diseño, y el historial de bugs ya corregidos (para no repetirlos).

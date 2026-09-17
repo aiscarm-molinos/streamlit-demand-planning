@@ -1,6 +1,6 @@
 # src/data/aws_s3_experimentos.py
 """
-Navegación de S3 para el tablero "Experimentos SageMaker".
+Navegación de S3 para el tablero "AWS SageMaker".
 
 Bucket ``ibp-forecast-sagemaker-data-595365649575``, prefijo
 ``ibp-forecast-mensual/exp`` -- ahí SageMaker deja, por usuario, los

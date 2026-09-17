@@ -20,6 +20,14 @@ modo local), queda guardado como "entrenamiento activo"
 (``experimentos_sagemaker_estado.py``) -- las páginas "Curvas de
 Backtesting", "Nivel de Planificación" y "Feature Importance" reusan esa
 misma elección en vez de pedir que se vuelva a elegir en cada una.
+
+"Comparar accuracy entre corridas" (2026-09-20, a pedido del usuario)
+desglosa por NIVEL_DE_PLANIFICACION en vez de un único promedio -- un
+promedio general puede cancelar una mejora en un nivel con una regresión en
+otro. La pestaña "📊 Resumen" del explorador de un .tar (nueva) muestra la
+distribución de accuracy de TODA la corrida (histograma + percentiles +
+desglose por nivel y por Modelo) -- antes solo se podía ver una entidad a
+la vez en "Curvas de Backtesting".
 """
 
 import glob
@@ -30,13 +38,14 @@ import streamlit as st
 from botocore.exceptions import ClientError, NoCredentialsError, ProfileNotFound
 
 from src import charts
+from src import experimentos_sagemaker_estado as estado
+from src import nivel_planificacion as niveles
 from src.config.dynamics_config import root_path
 from src.config.settings import s3_sagemaker_bucket, s3_sagemaker_configurado, s3_sagemaker_prefix
 from src.data import aws_s3_experimentos as s3exp
 from src.data import model_tar_explorer as tarexp
-from src import experimentos_sagemaker_estado as estado
 
-st.title("🧪 Experimentos SageMaker")
+st.title("🧪 Explorador de Entrenamientos")
 st.caption("Explorador de las pruebas de forecast del equipo de Supply en AWS SageMaker (exp/<usuario>/...).")
 
 col_link1, col_link2, col_link3 = st.columns(3)
@@ -60,51 +69,117 @@ def _formato_tamano(num_bytes: int) -> str:
     return f"{tamano:.1f} TB"
 
 
-def _tabla_objetos(archivos: list[s3exp.ObjetoS3]) -> None:
+def _tabla_objetos(archivos: list[s3exp.ObjetoS3], key: str) -> None:
     if not archivos:
         st.caption("(carpeta vacía)")
         return
-    st.dataframe(
-        pd.DataFrame(
-            [
-                {
-                    "Nombre": o.nombre,
-                    "Tamaño": _formato_tamano(o.size),
-                    "Última modificación": o.last_modified,
-                    "Storage class": o.storage_class,
-                }
-                for o in archivos
-            ]
-        ),
-        width="stretch",
-        hide_index=True,
+    df_archivos = pd.DataFrame(
+        [
+            {
+                "Nombre": o.nombre,
+                "Tamaño": _formato_tamano(o.size),
+                "Última modificación": o.last_modified,
+                "Storage class": o.storage_class,
+            }
+            for o in archivos
+        ]
     )
+    st.dataframe(df_archivos, width="stretch", hide_index=True)
+    charts.boton_descarga_csv(df_archivos, "listado_s3.csv", key=f"descarga_{key}")
 
 
-def _accuracy_promedio_de_tar(tar) -> float | None:
-    """Promedio de Accuracy_% de reports/accuracy_forecast_mensual.csv, o
-    None si el .tar no lo tiene -- usado para "Comparar accuracy entre
-    corridas"."""
+def _accuracy_por_nivel_de_tar(tar) -> pd.DataFrame | None:
+    """DataFrame [NIVEL_DE_PLANIFICACION, Accuracy_%] (promedio por nivel) de
+    reports/modelos_forecast_mensual.csv -- usado para desglosar "Comparar
+    accuracy entre corridas" por nivel en vez de un único promedio general
+    (2026-09-20, a pedido del usuario: un promedio único puede cancelar una
+    mejora en un nivel con una regresión en otro)."""
     contenido = tarexp.listar_contenido(tar)
-    miembro = next((m for m in contenido.reports if m.nombre.endswith("accuracy_forecast_mensual.csv")), None)
+    miembro = tarexp.buscar_miembro("modelos_forecast_mensual.csv", contenido.reports)
     if miembro is None:
         return None
     df = tarexp.leer_tabla(tar, miembro)
-    if "Accuracy_%" not in df.columns or df.empty:
+    col_accuracy = next((c for c in df.columns if c.lower().startswith("accuracy")), None)
+    if col_accuracy is None or df.empty:
         return None
-    return df["Accuracy_%"].mean() / 100
+    out = df.groupby("NIVEL_DE_PLANIFICACION", as_index=False)[col_accuracy].mean()
+    out = out.rename(columns={col_accuracy: "Accuracy_%"})
+    out["Nivel"] = out["NIVEL_DE_PLANIFICACION"].map(niveles.etiqueta_nivel)
+    return out
+
+
+def _resumen_corrida(tar) -> None:
+    """Pestaña "Resumen": distribución de accuracy de TODA la corrida (129
+    modelos en el .tar de ejemplo) -- histograma + percentiles + desglose
+    por nivel y por Modelo. Antes solo se podía ver una entidad a la vez en
+    "Curvas de Backtesting"."""
+    contenido = tarexp.listar_contenido(tar)
+    miembro = tarexp.buscar_miembro("modelos_forecast_mensual.csv", contenido.reports)
+    if miembro is None:
+        st.caption("No hay `reports/modelos_forecast_mensual.csv` para resumir esta corrida.")
+        return
+
+    df = tarexp.leer_tabla(tar, miembro)
+    col_accuracy = next((c for c in df.columns if c.lower().startswith("accuracy")), None)
+    if col_accuracy is None or df.empty:
+        st.caption("`modelos_forecast_mensual.csv` no tiene una columna de Accuracy reconocible.")
+        return
+
+    serie = df[col_accuracy].dropna()
+    col_a, col_b, col_c, col_d = st.columns(4)
+    col_a.metric("Modelos", len(df))
+    col_b.metric("Accuracy mediana", f"{serie.median():.1f}%")
+    col_c.metric("P25", f"{serie.quantile(0.25):.1f}%")
+    col_d.metric("P75", f"{serie.quantile(0.75):.1f}%")
+
+    st.plotly_chart(
+        charts.histograma(df.rename(columns={col_accuracy: "Accuracy_%"}), x="Accuracy_%", title="Distribución de Accuracy -- todos los modelos de la corrida"),
+        width="stretch",
+    )
+
+    col_izq, col_der = st.columns(2)
+    with col_izq:
+        st.subheader("Accuracy promedio por nivel")
+        df_nivel = df.copy()
+        df_nivel["Nivel"] = df_nivel["NIVEL_DE_PLANIFICACION"].map(niveles.etiqueta_nivel)
+        resumen_nivel = df_nivel.groupby("Nivel", as_index=False)[col_accuracy].mean().rename(columns={col_accuracy: "Accuracy_%"})
+        st.plotly_chart(charts.bar_chart(resumen_nivel, x="Nivel", y="Accuracy_%"), width="stretch")
+    with col_der:
+        if "Modelo" in df.columns and df["Modelo"].nunique() > 1:
+            st.subheader("Accuracy promedio por algoritmo")
+            resumen_modelo = df.groupby("Modelo", as_index=False)[col_accuracy].mean().rename(columns={col_accuracy: "Accuracy_%"})
+            st.plotly_chart(charts.bar_chart(resumen_modelo, x="Modelo", y="Accuracy_%"), width="stretch")
+        else:
+            st.subheader("Algoritmo")
+            st.caption(f"Todos los modelos de esta corrida usan el mismo algoritmo: **{df['Modelo'].iloc[0] if 'Modelo' in df.columns and not df.empty else '(no especificado)'}**.")
+
+    st.subheader("Peores 10 modelos de la corrida")
+    peores = df.nsmallest(10, col_accuracy)[["NIVEL_DE_PLANIFICACION", "VALOR_NIVEL", col_accuracy]].copy()
+    peores["NIVEL_DE_PLANIFICACION"] = peores["NIVEL_DE_PLANIFICACION"].map(niveles.etiqueta_nivel)
+    peores = peores.rename(columns={"NIVEL_DE_PLANIFICACION": "Nivel", "VALOR_NIVEL": "Entidad", col_accuracy: "Accuracy_%"})
+    st.dataframe(peores, width="stretch", hide_index=True)
+    if st.button("📉 Ver curva del peor modelo", key="ir_a_curva_peor"):
+        fila = df.nsmallest(1, col_accuracy).iloc[0]
+        estado.fijar_entidad_seleccionada(fila["NIVEL_DE_PLANIFICACION"], str(fila["VALOR_NIVEL"]))
+        st.switch_page("pages/10_Curvas_Backtesting.py")
+
+    charts.boton_descarga_csv(df, "modelos_forecast_mensual.csv", key="descarga_resumen_corrida")
 
 
 def _explorar_model_tar(tar) -> None:
     contenido = tarexp.listar_contenido(tar)
 
-    tab_reports, tab_modelos, tab_dataset = st.tabs(
+    tab_resumen, tab_reports, tab_modelos, tab_dataset = st.tabs(
         [
+            "📊 Resumen",
             f"📄 Reports ({len(contenido.reports)})",
             f"🧠 Modelos entrenados ({len(contenido.trained_models)})",
             f"📦 Dataset ({len(contenido.dataset)})",
         ]
     )
+
+    with tab_resumen:
+        _resumen_corrida(tar)
 
     with tab_reports:
         if not contenido.reports:
@@ -112,7 +187,9 @@ def _explorar_model_tar(tar) -> None:
         for miembro in contenido.reports:
             with st.expander(f"{miembro.nombre} ({_formato_tamano(miembro.size)})"):
                 if miembro.extension in tarexp.EXTENSIONES_TABLA:
-                    st.dataframe(tarexp.leer_tabla(tar, miembro), width="stretch")
+                    df_reporte = tarexp.leer_tabla(tar, miembro)
+                    st.dataframe(df_reporte, width="stretch")
+                    charts.boton_descarga_csv(df_reporte, os.path.basename(miembro.nombre), key=f"descarga_report_{miembro.nombre}")
                 elif miembro.extension in tarexp.EXTENSIONES_TEXTO:
                     st.code(tarexp.leer_texto(tar, miembro))
                 elif miembro.extension in tarexp.EXTENSIONES_IMAGEN:
@@ -124,14 +201,11 @@ def _explorar_model_tar(tar) -> None:
         if not contenido.trained_models:
             st.caption("No hay archivos en trained_models/.")
         else:
-            st.dataframe(
-                pd.DataFrame(
-                    [{"Archivo": m.nombre, "Tamaño": _formato_tamano(m.size)} for m in contenido.trained_models]
-                ),
-                width="stretch",
-                hide_index=True,
+            df_modelos_pkl = pd.DataFrame(
+                [{"Archivo": m.nombre, "Tamaño": _formato_tamano(m.size)} for m in contenido.trained_models]
             )
-            st.caption("Los .pkl no se deserializan (riesgo de ejecución de código arbitrario) -- solo se listan.")
+            st.dataframe(df_modelos_pkl, width="stretch", hide_index=True)
+            st.caption("Los .pkl no se deserializan acá (riesgo de ejecución de código arbitrario) -- solo se listan. Para deserializarlos, ver \"Feature Importance\".")
 
     with tab_dataset:
         if not contenido.dataset:
@@ -222,7 +296,7 @@ if fuente == "S3 (en vivo)":
         entrenamiento = st.selectbox("Entrenamiento", entrenamientos)
         _, archivos_output = s3exp.listar_contenido(f"{usuario}/models/{entrenamiento}/output")
         st.subheader(f"`{usuario}/models/{entrenamiento}/output/`")
-        _tabla_objetos(archivos_output)
+        _tabla_objetos(archivos_output, key="output_s3")
 
         with st.expander(f"📊 Comparar accuracy entre las {len(entrenamientos)} corridas de {usuario}"):
             if len(entrenamientos) < 2:
@@ -245,14 +319,18 @@ if fuente == "S3 (en vivo)":
                         )
                         filas = []
                         break
-                    acc_ent = _accuracy_promedio_de_tar(tarexp.abrir_tar(data_ent))
-                    if acc_ent is not None:
-                        filas.append({"Entrenamiento": ent, "Accuracy promedio": acc_ent})
+                    df_nivel_ent = _accuracy_por_nivel_de_tar(tarexp.abrir_tar(data_ent))
+                    if df_nivel_ent is not None:
+                        df_nivel_ent["Entrenamiento"] = ent
+                        filas.append(df_nivel_ent)
                 if filas:
+                    df_comparacion = pd.concat(filas, ignore_index=True)
                     st.plotly_chart(
-                        charts.bar_chart(pd.DataFrame(filas), x="Entrenamiento", y="Accuracy promedio", title=f"Accuracy promedio por corrida -- {usuario}"),
+                        charts.bar_chart(df_comparacion, x="Entrenamiento", y="Accuracy_%", color="Nivel", title=f"Accuracy promedio por nivel y corrida -- {usuario}"),
                         width="stretch",
                     )
+                    st.dataframe(df_comparacion.pivot(index="Entrenamiento", columns="Nivel", values="Accuracy_%"), width="stretch")
+                    charts.boton_descarga_csv(df_comparacion, f"comparacion_corridas_{usuario}.csv", key="descarga_comparacion_s3")
 
         objeto_tar = next((o for o in archivos_output if o.nombre.startswith("model.tar")), None)
         if objeto_tar and st.button(f"⬇️ Descargar y explorar {objeto_tar.nombre}"):
@@ -271,7 +349,7 @@ if fuente == "S3 (en vivo)":
     else:
         _, archivos = s3exp.listar_contenido(f"{usuario}/{carpeta}")
         st.subheader(f"`{usuario}/{carpeta}/`")
-        _tabla_objetos(archivos)
+        _tabla_objetos(archivos, key="carpeta_s3")
 
 else:  # Archivo local de ejemplo
     nombres = [os.path.basename(p) for p in archivos_sample]
@@ -286,13 +364,17 @@ else:  # Archivo local de ejemplo
         else:
             filas_local = []
             for p in archivos_sample:
-                acc_local = _accuracy_promedio_de_tar(tarexp.abrir_tar(p))
-                if acc_local is not None:
-                    filas_local.append({"Archivo": os.path.basename(p), "Accuracy promedio": acc_local})
+                df_nivel_local = _accuracy_por_nivel_de_tar(tarexp.abrir_tar(p))
+                if df_nivel_local is not None:
+                    df_nivel_local["Archivo"] = os.path.basename(p)
+                    filas_local.append(df_nivel_local)
             if filas_local:
+                df_comparacion_local = pd.concat(filas_local, ignore_index=True)
                 st.plotly_chart(
-                    charts.bar_chart(pd.DataFrame(filas_local), x="Archivo", y="Accuracy promedio", title="Accuracy promedio por archivo local"),
+                    charts.bar_chart(df_comparacion_local, x="Archivo", y="Accuracy_%", color="Nivel", title="Accuracy promedio por nivel y archivo local"),
                     width="stretch",
                 )
+                st.dataframe(df_comparacion_local.pivot(index="Archivo", columns="Nivel", values="Accuracy_%"), width="stretch")
+                charts.boton_descarga_csv(df_comparacion_local, "comparacion_archivos_locales.csv", key="descarga_comparacion_local")
             else:
-                st.caption("Ninguno de los archivos locales tiene reports/accuracy_forecast_mensual.csv.")
+                st.caption("Ninguno de los archivos locales tiene reports/modelos_forecast_mensual.csv.")

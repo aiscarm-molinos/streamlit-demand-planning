@@ -105,3 +105,10 @@ def leer_texto(tar: tarfile.TarFile, miembro: MiembroTar) -> str:
 def leer_bytes(tar: tarfile.TarFile, miembro: MiembroTar) -> bytes:
     with tar.extractfile(miembro.nombre) as f:
         return f.read()
+
+
+def buscar_miembro(nombre_sufijo: str, lista: list[MiembroTar]) -> MiembroTar | None:
+    """Primer miembro de ``lista`` cuyo nombre termina en ``nombre_sufijo``
+    (ej. ``"accuracy_forecast_mensual.csv"``), o ``None``. Compartido por
+    las páginas 10/11/12 (antes duplicado como ``_buscar`` local en cada una)."""
+    return next((m for m in lista if m.nombre.endswith(nombre_sufijo)), None)

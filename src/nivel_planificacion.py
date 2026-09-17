@@ -1,7 +1,7 @@
 # src/nivel_planificacion.py
 """
 Lógica de negocio de "Nivel de Planificación" y "Feature Importance"
-(Experimentos SageMaker) -- resuelve, para una entidad (PRDFAMILY) y un
+(AWS SageMaker) -- resuelve, para una entidad (PRDFAMILY) y un
 nivel de planificación (PRDID/PRDFAMILY/ZINDFAMILY/ZBRAND/ZBIGBUSINESS), a
 qué valor(es) de ese nivel corresponde, para poder:
 - buscar su accuracy en ``reports/modelos_forecast_mensual.csv`` (Nivel de

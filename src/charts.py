@@ -116,6 +116,13 @@ def bar_chart(df: pd.DataFrame, x: str, y: str, color: str = None, title: str = 
     return _base_layout(fig, title)
 
 
+def histograma(df: pd.DataFrame, x: str, nbins: int = None, title: str = None) -> go.Figure:
+    """Distribución de una métrica continua (ej. Accuracy_% de todos los
+    modelos de una corrida de AWS SageMaker)."""
+    fig = px.histogram(df, x=x, nbins=nbins, color_discrete_sequence=[CATEGORICAL[0]])
+    return _base_layout(fig, title)
+
+
 def pie_chart(df: pd.DataFrame, names: str, values: str, title: str = None) -> go.Figure:
     fig = px.pie(df, names=names, values=values, hole=0.45)
     fig.update_traces(textinfo="label+percent", textposition="outside")

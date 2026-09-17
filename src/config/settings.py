@@ -78,7 +78,7 @@ aws_secret_access_key = os.getenv("AWS_SECRET_ACCESS_KEY")
 aws_session_token = os.getenv("AWS_SESSION_TOKEN")
 
 # -------------------------------
-# AWS S3 SETTINGS (Experimentos SageMaker)
+# AWS S3 SETTINGS (AWS SageMaker)
 # -------------------------------
 # Cuenta/rol distintos a los de Athena arriba (cuenta "AI_Platform_DEV", rol
 # "MRP_Analistas_IBP_AWS") -- por eso viven en su propio .env con su propio

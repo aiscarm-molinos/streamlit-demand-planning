@@ -9,7 +9,7 @@ Streamlit (Python 3.13): la deserialización de estos .pkl requiere
 reproducir casi exactamente el entorno de entrenamiento de SageMaker --
 ``numpy==2.0.2`` no tiene wheel para Python 3.13, y aun con versiones
 "cercanas" aparecen incompatibilidades binarias más adentro (booster de
-XGBoost). Ver CLAUDE.md, sección "Experimentos SageMaker" / Feature
+XGBoost). Ver CLAUDE.md, sección "AWS SageMaker" / Feature
 Importance, para el detalle de cómo se llegó a esta arquitectura.
 
 ``.venv310/`` es un venv aparte (gitignorado, igual que ``.venv/``) -- no
@@ -48,7 +48,7 @@ def extraer_feature_importance(pkl_bytes: bytes, timeout: int = 120) -> dict:
             "error": (
                 "No está creado `.venv310` (Python 3.10 + requirements_fcst.txt) -- "
                 "necesario para deserializar modelos de SageMaker. Ver README, sección "
-                "\"Experimentos SageMaker\"."
+                "\"AWS SageMaker\"."
             ),
         }
 
