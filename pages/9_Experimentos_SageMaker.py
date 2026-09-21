@@ -8,8 +8,8 @@ esa precarga. Dos fuentes de datos, elegidas con un radio:
 
 - **S3 (en vivo)**: navega ``exp/<usuario>/{input,models,predictions,
   processed}`` en el bucket de ``s3_sagemaker.env`` vía
-  ``aws_s3_experimentos.py`` (solo listado -- el rol ``MRP_Analistas_IBP_AWS``
-  hoy no tiene ``s3:GetObject``, así que el botón "Descargar y explorar
+  ``aws_s3_experimentos.py`` (solo listado -- el rol ``ibp-forecast-sagemaker-user-role``
+  puede no tener ``s3:GetObject``, así que el botón "Descargar y explorar
   model.tar" va a fallar con un mensaje claro hasta que se sumen permisos).
 - **Archivo local de ejemplo**: explora un ``model.tar`` puesto a mano en
   ``sample_data/sagemaker/`` (gitignored) vía ``model_tar_explorer.py`` --
@@ -166,7 +166,7 @@ def _resumen_corrida(tar) -> None:
     charts.boton_descarga_csv(df, "modelos_forecast_mensual.csv", key="descarga_resumen_corrida")
 
 
-def _explorar_model_tar(tar) -> None:
+def _explorar_model_tar(tar, info: dict | None = None) -> None:
     contenido = tarexp.listar_contenido(tar)
 
     tab_resumen, tab_reports, tab_modelos, tab_dataset = st.tabs(
@@ -174,7 +174,7 @@ def _explorar_model_tar(tar) -> None:
             "📊 Resumen",
             f"📄 Reports ({len(contenido.reports)})",
             f"🧠 Modelos entrenados ({len(contenido.trained_models)})",
-            f"📦 Dataset ({len(contenido.dataset)})",
+            "📦 Dataset (S3)" if estado.es_origen_s3(info) else f"📦 Dataset ({len(contenido.dataset)})",
         ]
     )
 
@@ -208,9 +208,21 @@ def _explorar_model_tar(tar) -> None:
             st.caption("Los .pkl no se deserializan acá (riesgo de ejecución de código arbitrario) -- solo se listan. Para deserializarlos, ver \"Feature Importance\".")
 
     with tab_dataset:
-        if not contenido.dataset:
+        if estado.es_origen_s3(info):
+            try:
+                df_s3 = estado.dataset_procesado_s3(info["usuario"])
+            except Exception as e:
+                st.error(f"No se pudo bajar el dataset de `{info['usuario']}/processed/`: `{e}`")
+            else:
+                st.write(f"**{info['usuario']}/processed/preprocessed_forecast_mensual.csv**")
+                st.dataframe(df_s3.head(200), width="stretch")
+                st.caption(f"{len(df_s3)} filas x {len(df_s3.columns)} columnas -- el más reciente del usuario en S3, no necesariamente el de esta corrida.")
+            contenido_dataset = []
+        else:
+            contenido_dataset = contenido.dataset
+        if not contenido_dataset and not estado.es_origen_s3(info):
             st.caption("No se encontró el dataset (preprocessed_forecast_mensual) en este .tar.")
-        for miembro in contenido.dataset:
+        for miembro in contenido_dataset:
             st.write(f"**{miembro.nombre}** ({_formato_tamano(miembro.size)})")
             if miembro.extension in tarexp.EXTENSIONES_TABLA:
                 df = tarexp.leer_tabla(tar, miembro)
@@ -312,7 +324,7 @@ if fuente == "S3 (en vivo)":
                         data_ent = s3exp.descargar_objeto(obj_tar_ent.key)
                     except ClientError as e:
                         st.error(
-                            "No se pudo descargar `model.tar` -- el rol `MRP_Analistas_IBP_AWS` no tiene permiso "
+                            "No se pudo descargar `model.tar` -- el rol `ibp-forecast-sagemaker-user-role` no tendría permiso "
                             "de descarga (`s3:GetObject`) todavía, así que comparar corridas en vivo no funciona "
                             "hasta que se sume ese permiso. Mientras tanto, probá en modo local con más de un "
                             f"archivo en `sample_data/sagemaker/`.\n\n`{e}`"
@@ -338,14 +350,14 @@ if fuente == "S3 (en vivo)":
                 contenido_bytes = s3exp.descargar_objeto(objeto_tar.key)
             except ClientError as e:
                 st.error(
-                    "No se pudo descargar `model.tar` -- el rol `MRP_Analistas_IBP_AWS` no tiene permiso de "
+                    "No se pudo descargar `model.tar` -- el rol `ibp-forecast-sagemaker-user-role` no tendría permiso de "
                     f"descarga (`s3:GetObject`) todavía. Mientras tanto, usá el modo \"Archivo local de ejemplo\".\n\n`{e}`"
                 )
             else:
                 estado.fijar_activo_desde_bytes(
                     contenido_bytes, objeto_tar.nombre, origen="S3", usuario=usuario, entrenamiento=entrenamiento
                 )
-                _explorar_model_tar(tarexp.abrir_tar(contenido_bytes))
+                _explorar_model_tar(tarexp.abrir_tar(contenido_bytes), estado.tar_activo_info())
     else:
         _, archivos = s3exp.listar_contenido(f"{usuario}/{carpeta}")
         st.subheader(f"`{usuario}/{carpeta}/`")

@@ -18,7 +18,7 @@ proyecto (ver .env.example):
   SageMaker" (AWS_PROFILE_SAGEMAKER/AWS_REGION_SAGEMAKER o credenciales
   explícitas *_SAGEMAKER, AWS_S3_SAGEMAKER_BUCKET, AWS_S3_SAGEMAKER_PREFIX).
   Cuenta y rol DISTINTOS de los de Athena (cuenta "AI_Platform_DEV", rol
-  "MRP_Analistas_IBP_AWS") -- por eso no reutiliza aws_profile_name.
+  "ibp-forecast-sagemaker-user-role") -- por eso no reutiliza aws_profile_name.
 
 Mismo patrón que ``ibp-forecast-mensual/src/config/settings.py``. Ninguno
 de los dos .env se commitea (ver .gitignore).
@@ -81,7 +81,7 @@ aws_session_token = os.getenv("AWS_SESSION_TOKEN")
 # AWS S3 SETTINGS (AWS SageMaker)
 # -------------------------------
 # Cuenta/rol distintos a los de Athena arriba (cuenta "AI_Platform_DEV", rol
-# "MRP_Analistas_IBP_AWS") -- por eso viven en su propio .env con su propio
+# "ibp-forecast-sagemaker-user-role") -- por eso viven en su propio .env con su propio
 # perfil/credenciales, en vez de reutilizar aws_profile_name.
 s3_sagemaker_env_path = os.path.join(root_path, "s3_sagemaker.env")
 load_dotenv(dotenv_path=s3_sagemaker_env_path)

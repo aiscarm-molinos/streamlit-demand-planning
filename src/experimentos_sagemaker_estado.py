@@ -80,6 +80,46 @@ def requerir_tar_activo():
     return activo
 
 
+@st.cache_data(show_spinner="Bajando el dataset procesado de S3...")
+def dataset_procesado_s3(usuario: str):
+    """``exp/<usuario>/processed/preprocessed_forecast_mensual.csv`` como DataFrame
+    (cacheado por usuario). Lanza la excepción de boto3 si falla."""
+    from src.data import aws_s3_experimentos as s3exp
+
+    return tarexp.leer_tabla_desde_bytes(s3exp.descargar_dataset_procesado(usuario))
+
+
+def es_origen_s3(info) -> bool:
+    return bool(info) and info.get("origen") == "S3" and bool(info.get("usuario"))
+
+
+def cargar_dataset(tar, contenido, info):
+    """Dataset (``preprocessed_forecast_mensual``) del entrenamiento activo,
+    como ``DataFrame``, o ``None`` si no se pudo obtener.
+
+    Con origen S3 (en vivo) siempre viene de ``<usuario>/processed/`` (decisión
+    del usuario, 2026-09-21) -- es el dataset más reciente del usuario, no
+    necesariamente el de esa corrida; se avisa con un caption. Solo si esa
+    descarga falla se cae al del propio tar (si lo trae). Con origen local, del tar."""
+    m_dataset = next((m for m in contenido.dataset if m.extension in tarexp.EXTENSIONES_TABLA), None)
+
+    if es_origen_s3(info):
+        try:
+            df = dataset_procesado_s3(info["usuario"])
+        except Exception as e:
+            st.warning(f"No se pudo bajar el dataset de `{info['usuario']}/processed/` en S3: `{e}`", icon="⚠️")
+        else:
+            st.caption(
+                f"ℹ️ Dataset tomado de S3 (`{info['usuario']}/processed/preprocessed_forecast_mensual.csv`, "
+                "el más reciente del usuario, no necesariamente el de esta corrida)."
+            )
+            return df
+
+    if m_dataset is not None:
+        return tarexp.leer_tabla(tar, m_dataset)
+    return None
+
+
 def fijar_entidad_seleccionada(nivel: str, valor: str) -> None:
     """Guarda ``(nivel, valor)`` para que "Curvas de Backtesting" los
     preseleccione la próxima vez que se abra -- usado desde tablas de

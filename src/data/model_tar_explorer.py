@@ -3,7 +3,7 @@
 Exploración local de un ``model.tar`` de SageMaker (salida de
 ``exp/<usuario>/models/<entrenamiento>/output/model.tar``).
 
-Modo local: mientras el rol ``MRP_Analistas_IBP_AWS`` no tenga
+Modo local: mientras el rol ``ibp-forecast-sagemaker-user-role`` no tenga
 ``s3:GetObject`` (ver ``aws_s3_experimentos.py``), el tablero explora una
 copia del ``.tar`` puesta a mano en ``sample_data/sagemaker/`` en vez de
 bajarla de S3. La estructura interna esperada (según el usuario, no
@@ -95,6 +95,12 @@ def leer_tabla(tar: tarfile.TarFile, miembro: MiembroTar) -> pd.DataFrame:
     (los lee igual que utf-8 puro), así que es seguro dejarlo siempre."""
     with tar.extractfile(miembro.nombre) as f:
         return pd.read_csv(f, sep=None, engine="python", decimal=",", encoding="utf-8-sig")
+
+
+def leer_tabla_desde_bytes(data: bytes) -> pd.DataFrame:
+    """Igual que ``leer_tabla`` (mismos parámetros, ver su docstring) pero
+    sobre bytes sueltos -- ej. un CSV bajado directo de S3, fuera de un tar."""
+    return pd.read_csv(io.BytesIO(data), sep=None, engine="python", decimal=",", encoding="utf-8-sig")
 
 
 def leer_texto(tar: tarfile.TarFile, miembro: MiembroTar) -> str:

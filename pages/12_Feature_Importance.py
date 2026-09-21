@@ -90,14 +90,16 @@ def _mostrar_importancias(df_fi_raw: pd.DataFrame, titulo: str, key_prefix: str)
 
 if modo == "Por entidad":
     m_mejor_nivel = tarexp.buscar_miembro("mejor_nivel_planificacion_por_entidad.csv", contenido.reports)
-    m_dataset = next((m for m in contenido.dataset if m.extension in tarexp.EXTENSIONES_TABLA), None)
+    if m_mejor_nivel is None:
+        st.warning("Este entrenamiento no tiene `mejor_nivel_planificacion_por_entidad.csv`.", icon="⚠️")
+        st.stop()
 
-    if m_mejor_nivel is None or m_dataset is None:
-        st.warning("Este entrenamiento no tiene `mejor_nivel_planificacion_por_entidad.csv` o el dataset.", icon="⚠️")
+    df_dataset = estado.cargar_dataset(tar, contenido, info)
+    if df_dataset is None:
+        st.warning("Este entrenamiento no tiene el dataset (preprocessed_forecast_mensual).", icon="⚠️")
         st.stop()
 
     df_mejor_nivel = tarexp.leer_tabla(tar, m_mejor_nivel)
-    df_dataset = tarexp.leer_tabla(tar, m_dataset)
 
     entidad = st.selectbox("Entidad (Familia)", sorted(df_mejor_nivel["PRDFAMILY"].unique()))
     fila = df_mejor_nivel[df_mejor_nivel["PRDFAMILY"] == entidad].iloc[0]

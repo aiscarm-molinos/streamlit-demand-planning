@@ -31,15 +31,16 @@ tar, contenido, info = estado.requerir_tar_activo()
 
 m_mejor_nivel = tarexp.buscar_miembro("mejor_nivel_planificacion_por_entidad.csv", contenido.reports)
 m_modelos = tarexp.buscar_miembro("modelos_forecast_mensual.csv", contenido.reports)
-m_resumen_niveles = tarexp.buscar_miembro("resumen_niveles_planificacion_mensual.csv", contenido.reports)
-m_dataset = next((m for m in contenido.dataset if m.extension in tarexp.EXTENSIONES_TABLA), None)
+# Según la corrida, el report se llama con o sin el sufijo "_mensual".
+m_resumen_niveles = tarexp.buscar_miembro("resumen_niveles_planificacion_mensual.csv", contenido.reports) or tarexp.buscar_miembro(
+    "resumen_niveles_planificacion.csv", contenido.reports
+)
 
 faltantes = [
     nombre
     for nombre, m in [
         ("reports/mejor_nivel_planificacion_por_entidad.csv", m_mejor_nivel),
         ("reports/modelos_forecast_mensual.csv", m_modelos),
-        ("dataset (preprocessed_forecast_mensual)", m_dataset),
     ]
     if m is None
 ]
@@ -47,9 +48,13 @@ if faltantes:
     st.warning(f"Este entrenamiento no tiene: {', '.join(faltantes)}.", icon="⚠️")
     st.stop()
 
+df_dataset = estado.cargar_dataset(tar, contenido, info)
+if df_dataset is None:
+    st.warning("Este entrenamiento no tiene el dataset (preprocessed_forecast_mensual).", icon="⚠️")
+    st.stop()
+
 df_mejor_nivel = tarexp.leer_tabla(tar, m_mejor_nivel)
 df_modelos = tarexp.leer_tabla(tar, m_modelos)
-df_dataset = tarexp.leer_tabla(tar, m_dataset)
 df_resumen_niveles = tarexp.leer_tabla(tar, m_resumen_niveles) if m_resumen_niveles is not None else None
 
 st.divider()
@@ -93,7 +98,7 @@ st.divider()
 st.subheader("Comparación de niveles candidatos por entidad")
 
 if df_resumen_niveles is None or df_resumen_niveles.empty:
-    st.info("Este entrenamiento no tiene `reports/resumen_niveles_planificacion_mensual.csv` -- no se puede comparar niveles candidatos.")
+    st.info("Este entrenamiento no tiene `reports/resumen_niveles_planificacion[_mensual].csv` -- no se puede comparar niveles candidatos.")
 else:
     entidad_elegida = st.selectbox("Familia", sorted(df_resumen_niveles["PRDFAMILY"].unique()), key="entidad_comparacion_niveles")
 

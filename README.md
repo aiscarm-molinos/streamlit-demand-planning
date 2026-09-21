@@ -37,7 +37,7 @@ Sección aparte, sin relación con los dos tableros de arriba (no depende de SAP
 | Nivel de Planificación | Cuántas veces cada nivel de la jerarquía de producto fue elegido como mejor, y su accuracy (`reports/mejor_nivel_planificacion_por_entidad.csv` + `modelos_forecast_mensual.csv`) |
 | Feature Importance | Qué variables pesaron más en la predicción de los modelos elegidos como mejores (deserializa los `.pkl` de `trained_models/`) |
 
-- **S3 (en vivo)** — navega usuarios → carpetas → entrenamientos (`models/`) vía listado (`s3:ListBucket`, ver `s3_sagemaker.env`). El rol `MRP_Analistas_IBP_AWS` hoy **no** tiene `s3:GetObject`, así que no se puede descargar/explorar el contenido de un `model.tar` desde acá todavía — el botón lo indica con un mensaje claro.
+- **S3 (en vivo)** — navega usuarios → carpetas → entrenamientos (`models/`) vía listado (`s3:ListBucket`, ver `s3_sagemaker.env`). El rol `ibp-forecast-sagemaker-user-role` hoy **no** tiene `s3:GetObject`, así que no se puede descargar/explorar el contenido de un `model.tar` desde acá todavía — el botón lo indica con un mensaje claro.
 - **Archivo local de ejemplo** — mientras no haya permiso de descarga, explora un `model.tar`/`model.tar.gz` puesto a mano en `sample_data/sagemaker/` (carpeta gitignored, no se commitea): pestañas para `reports/` (previsualiza csv/txt/imágenes), `trained_models/` (solo lista los `.pkl` para navegación general — sí se deserializan puntualmente en "Feature Importance", ver abajo) y el dataset (`preprocessed_forecast_mensual`).
 
 #### Feature Importance: `.venv310` (Python 3.10 aparte)
@@ -75,7 +75,7 @@ Ninguna credencial se commitea (`.gitignore` cubre `*.env`). Ver `.env.example` 
 - **`ibp.env`** — SAP IBP OData: `IBP_USERNAME`, `IBP_PASSWORD`, `IBP_BASE_URL`, `IBP_PA_DEMANDA`.
 - **`aws.env`** — AWS Athena: `AWS_PROFILE`, `AWS_REGION`, `AWS_DATABASE`, `AWS_S3_STAGING`.
 - **`aws_credentials.env`** (opcional) — credenciales AWS explícitas (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_SESSION_TOKEN`) cuando no hay un perfil SSO configurado localmente; tienen prioridad sobre `AWS_PROFILE`. Son temporales (SSO) y expiran cada tantas horas — al vencer, la app cae sola a modo demo para Athena.
-- **`s3_sagemaker.env`** — AWS S3 para "AWS SageMaker": `AWS_PROFILE_SAGEMAKER`/`AWS_REGION_SAGEMAKER` (o credenciales explícitas `*_SAGEMAKER`), `AWS_S3_SAGEMAKER_BUCKET`, `AWS_S3_SAGEMAKER_PREFIX`. Cuenta y rol **distintos** de los de Athena (cuenta `AI_Platform_DEV`, rol `MRP_Analistas_IBP_AWS`) — no reutiliza `AWS_PROFILE`/`aws_credentials.env` de arriba.
+- **`s3_sagemaker.env`** — AWS S3 para "AWS SageMaker": `AWS_PROFILE_SAGEMAKER`/`AWS_REGION_SAGEMAKER` (o credenciales explícitas `*_SAGEMAKER`), `AWS_S3_SAGEMAKER_BUCKET`, `AWS_S3_SAGEMAKER_PREFIX`. Cuenta y rol **distintos** de los de Athena (cuenta `AI_Platform_DEV`, rol `ibp-forecast-sagemaker-user-role`) — no reutiliza `AWS_PROFILE`/`aws_credentials.env` de arriba.
 
 **Después de cambiar cualquier `*.env` o cualquier archivo de `src/`, hay que reiniciar el proceso de Streamlit** (`Ctrl+C` y volver a correr `streamlit run app.py`) — el botón "🔄 Recargar datos" del Inicio no alcanza, solo limpia el cache de datos, no reimporta módulos de Python.
 
@@ -133,6 +133,6 @@ UOM = `UMG` para todas las series y para el maestro de clientes; `CAJ` solo para
 - No es pixel-perfect contra los `.pbix` originales (algunos sliders son multiselect en vez de range slider, falta algún banner de texto decorativo).
 - El histórico visible es de 24 meses hacia atrás / 12 hacia adelante (configurable en `cache.py::MESES_HISTORICOS`/`MESES_FUTUROS`) por costo de carga contra SAP — el Power BI real muestra más años de histórico.
 - Detalle de cliente limitado a Área/GC en las consultas de series (ver "Reglas de negocio clave" arriba) — es una limitación real del Gateway de SAP, no de esta app.
-- "AWS SageMaker" no puede descargar/explorar un `model.tar` desde S3 todavía — el rol `MRP_Analistas_IBP_AWS` solo tiene permiso de listado (`s3:ListBucket`), no de descarga (`s3:GetObject`). Mientras se gestiona el permiso, la exploración de contenido funciona en modo local con un `.tar` de ejemplo en `sample_data/sagemaker/`.
+- "AWS SageMaker" descarga el `model.tar.gz` de S3 con el rol `ibp-forecast-sagemaker-user-role` (verificado 2026-09-21). Algunos `.tar.gz` no traen el dataset ni el sufijo `_mensual` en el report de niveles: Nivel de Planificación y Feature Importance lo resuelven solos (con origen S3 el dataset se toma siempre de `<usuario>/processed/` en S3 -- el más reciente, no necesariamente el de la corrida --, y se aceptan ambos nombres del report). Si el rol pierde `s3:GetObject`, la descarga falla con `AccessDenied` y queda el modo local con un `.tar` en `sample_data/sagemaker/`.
 
 Ver [`CLAUDE.md`](./CLAUDE.md) para el detalle completo de cada uno de estos puntos, decisiones de diseño, y el historial de bugs ya corregidos (para no repetirlos).

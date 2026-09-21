@@ -6,13 +6,13 @@ Bucket ``ibp-forecast-sagemaker-data-595365649575``, prefijo
 ``ibp-forecast-mensual/exp`` -- ahí SageMaker deja, por usuario, los
 experimentos de forecast (``input/``, ``models/``, ``predictions/``,
 ``processed/``). Usa credenciales propias (``s3_sagemaker.env``, cuenta
-"AI_Platform_DEV", rol "MRP_Analistas_IBP_AWS"), distintas de las de Athena
+"AI_Platform_DEV", rol "ibp-forecast-sagemaker-user-role"), distintas de las de Athena
 en ``aws_ejecutar_query.py``.
 
-El rol ``MRP_Analistas_IBP_AWS`` hoy solo tiene ``s3:ListBucket`` -- las
-funciones de listado (``listar_*``) andan; ``descargar_objeto`` (necesita
-``s3:GetObject``) va a fallar con ``AccessDenied`` hasta que se sumen
-permisos. Los callers deben capturar ``ClientError`` alrededor de
+El rol anterior (``MRP_Analistas_IBP_AWS``) solo tenía ``s3:ListBucket``; los permisos de ``ibp-forecast-sagemaker-user-role`` no están verificados. Las
+funciones de listado (``listar_*``) necesitan ``s3:ListBucket``;
+``descargar_objeto`` necesita ``s3:GetObject`` y falla con ``AccessDenied``
+si el rol no lo tiene. Los callers deben capturar ``ClientError`` alrededor de
 ``descargar_objeto`` y ofrecer el modo local (``model_tar_explorer.py`` +
 ``sample_data/sagemaker/``) como fallback -- no está resuelto acá adentro
 porque el mensaje/fallback que tiene sentido depende de cada página.
@@ -124,9 +124,21 @@ def listar_contenido(prefix_relativo: str) -> tuple[list[str], list[ObjetoS3]]:
     return _listar_prefijo(prefix)
 
 
+def descargar_dataset_procesado(usuario: str) -> bytes:
+    """Descarga ``exp/<usuario>/processed/preprocessed_forecast_mensual.csv``.
+
+    Ubicación canónica del dataset (confirmada por el usuario 2026-09-21: siempre
+    está ahí). Algunos ``model.tar.gz`` no lo traen adentro (corridas de
+    agosto 2026), así que ``cargar_dataset`` recurre a esta ruta.
+    OJO: es el dataset MÁS RECIENTE del usuario, no necesariamente el de la
+    corrida elegida -- sirve para resolver entidad→nivel→valor (jerarquía de
+    producto), que rara vez cambia entre corridas."""
+    return descargar_objeto(f"{_prefijo_exp()}{usuario}/processed/preprocessed_forecast_mensual.csv")
+
+
 def descargar_objeto(key: str) -> bytes:
     """Descarga el contenido de una key de S3. Requiere ``s3:GetObject`` --
-    con el rol ``MRP_Analistas_IBP_AWS`` actual, lanza ``ClientError``
+    si el rol ``ibp-forecast-sagemaker-user-role`` no lo tiene, lanza ``ClientError``
     (AccessDenied). Ver el docstring del módulo para el fallback esperado."""
     s3 = _cliente_s3()
     response = s3.get_object(Bucket=s3_sagemaker_bucket, Key=key)
