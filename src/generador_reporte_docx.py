@@ -1,8 +1,9 @@
 # src/generador_reporte_docx.py
 """
 Arma el .docx del "Reporte de Resultados" mensual -- mismo layout que el
-real (``reports/`` -- logo Molinos, títulos azules, tablas con semáforo de
-color, párrafos narrativos entre tablas), pero con **tablas nativas de
+real (``reports/`` -- logo Molinos, títulos azules, tablas con semáforo
+-- un círculo de color al lado del número, ver ``_texto_con_semaforo`` --,
+párrafos narrativos entre tablas), pero con **tablas nativas de
 Word** en vez de imágenes pegadas desde Excel (así son las del archivo
 real, confirmado extrayendo ``word/media/*.png`` del .docx -- ver
 CLAUDE.md). Convierte a PDF con ``docx2pdf`` (usa Word instalado
@@ -69,6 +70,28 @@ def _texto_celda(cell, texto: str, negrita: bool = False, centrado: bool = True,
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = p.add_run(texto)
     _fuente(run, negrita=negrita, tamano=Pt(9), color=RGBColor(0xFF, 0xFF, 0xFF) if color_blanco else None)
+    cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+
+
+SIMBOLO_SEMAFORO = "●"  # ● -- en Calibri, se ve igual en Word y en el PDF (lo convierte Word)
+
+
+def _texto_con_semaforo(cell, texto: str, nivel: str, negrita: bool = False) -> None:
+    """Celda con un círculo de color estilo semáforo al lado del número
+    (``● 85%``), en vez de sombrear la celda entera -- a pedido del
+    usuario (2026-10-02). El número queda en negro sobre fondo blanco; solo
+    el círculo lleva el color del nivel (``_HEX_NIVEL``). ``sin_dato`` no
+    dibuja círculo. Entre el círculo y el número va un espacio NO separable
+    para que, en columnas angostas (ver ``_fijar_ancho_columnas``), Word no
+    los parta en dos renglones."""
+    cell.text = ""
+    p = cell.paragraphs[0]
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    if nivel != "sin_dato":
+        circulo = p.add_run(SIMBOLO_SEMAFORO + " ")
+        _fuente(circulo, tamano=Pt(12), color=RGBColor.from_string(_HEX_NIVEL[nivel].upper()))
+    run = p.add_run(texto)
+    _fuente(run, negrita=negrita, tamano=Pt(9))
     cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
 
@@ -213,11 +236,9 @@ def _tabla_pivot_semaforo(doc: Document, tabla: pd.DataFrame, es_bias: bool = Fa
             if pd.isna(valor):
                 _texto_celda(celda, "—")
             elif es_bias:
-                _texto_celda(celda, _formato_bias(valor, capar_extremos))
-                _sombrear_celda(celda, _HEX_NIVEL[alertas.nivel_bias(valor)])
+                _texto_con_semaforo(celda, _formato_bias(valor, capar_extremos), alertas.nivel_bias(valor))
             else:
-                _texto_celda(celda, f"{valor:.0%}")
-                _sombrear_celda(celda, _HEX_NIVEL[alertas.nivel_accuracy(valor)])
+                _texto_con_semaforo(celda, f"{valor:.0%}", alertas.nivel_accuracy(valor))
         fila_division_anterior = division
 
     if compacto:
@@ -275,8 +296,7 @@ def _tabla_ranking(doc: Document, tabla: pd.DataFrame, col_nombre: str, etiqueta
             if pd.isna(valor):
                 _texto_celda(celdas[idx], "—", negrita=es_total)
             else:
-                _texto_celda(celdas[idx], f"{valor:.0%}", negrita=es_total)
-                _sombrear_celda(celdas[idx], _HEX_NIVEL[alertas.nivel_accuracy(valor)])
+                _texto_con_semaforo(celdas[idx], f"{valor:.0%}", alertas.nivel_accuracy(valor), negrita=es_total)
             idx += 1
         if mostrar_bias:
             for col in ["Bias Consensuado", "Bias Estadistico"]:
@@ -284,8 +304,7 @@ def _tabla_ranking(doc: Document, tabla: pd.DataFrame, col_nombre: str, etiqueta
                 if pd.isna(valor):
                     _texto_celda(celdas[idx], "—", negrita=es_total)
                 else:
-                    _texto_celda(celdas[idx], f"{valor:+.1%}", negrita=es_total)
-                    _sombrear_celda(celdas[idx], _HEX_NIVEL[alertas.nivel_bias(valor)])
+                    _texto_con_semaforo(celdas[idx], f"{valor:+.1%}", alertas.nivel_bias(valor), negrita=es_total)
                 idx += 1
         for col in ["Cons vs Est", "Cons vs Est U6M"]:
             valor = datos_fila.get(col)
