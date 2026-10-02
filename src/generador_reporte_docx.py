@@ -318,7 +318,12 @@ def _tabla_ranking(doc: Document, tabla: pd.DataFrame, col_nombre: str, etiqueta
 
     n_numericas = 2 + (2 if mostrar_bias else 0) + 2  # Consenso/Estadístico [+Bias Cons./Estad.] + Cons vs Est/U6M
     if columnas_extra:
-        _fijar_ancho_columnas(t, [Cm(1.4), Cm(7.0)] + [Cm(1.75)] * n_numericas)
+        # "Estadístico" (2da numérica) no entra en 1,75 cm y Word lo partía en
+        # "Estadístic"/"o" -- esa columna va a 2,25 cm, compensado sacándole
+        # 0,5 cm a Descripción para seguir dentro del ancho útil (márgenes 1,3 cm).
+        anchos_num = [Cm(1.75)] * n_numericas
+        anchos_num[1] = Cm(2.25)
+        _fijar_ancho_columnas(t, [Cm(1.4), Cm(6.5)] + anchos_num)
     else:
         _fijar_ancho_columnas(t, [Cm(4.0)] + [Cm(2.4)] * n_numericas)
 
